@@ -42,7 +42,7 @@ DEEPSEEK_API_KEY = "sk-c9ea6887cf524832bcd670fd82ed603e".strip()
 DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 
 # --- ComfyUI 配置 (远程服务器) ---
-COMFYUI_API_URL = "http://localhost:8188/prompt"
+COMFYUI_API_URL = "http://localhost:8000/prompt"
 COMFYUI_OUTPUT_DIR = "../static/comfyui_output"
 
 # --- 本地存储配置 ---
@@ -53,35 +53,6 @@ WORKS_DIR = "../static/works"
 os.makedirs(STATIC_DIR, exist_ok=True)
 os.makedirs(TEMP_DIR, exist_ok=True)
 os.makedirs(WORKS_DIR, exist_ok=True)
-
-# ================= 2. 静态课文数据 =================
-
-BUILT_IN_TEXTS = [
-    {
-        "id": 1,
-        "title": "荷塘月色",
-        "author": "朱自清",
-        "content": "曲曲折折的荷塘上面，弥望的是田田的叶子。叶子出水很高，像亭亭的舞女的裙。层层的叶子中间，零星地点缀着些白花，有袅娜地开着的，有羞涩地打着朵儿的；正如一粒粒的明珠，又如碧天里的星星，又如刚出浴的美人。微风过处，送来缕缕清香，仿佛远处高楼上渺茫的歌声似的。"
-    },
-    {
-        "id": 2,
-        "title": "春",
-        "author": "朱自清",
-        "content": "盼望着，盼望着，东风来了，春天的脚步近了。一切都像刚睡醒的样子，欣欣然张开了眼。山朗润起来了，水涨起来了，太阳的脸红起来了。小草偷偷地从土地里钻出来，嫩嫩的，绿绿的。园子里，田野里，瞧去，一大片一大片满是的。"
-    },
-    {
-        "id": 3,
-        "title": "济南的冬天",
-        "author": "老舍",
-        "content": "对于一个在北平住惯的人，像我，冬天要是不刮风，便觉得是奇迹；济南的冬天是没有风声的。对于一个刚由伦敦回来的人，像我，冬天要能看得见日光，便觉得是怪事；济南的冬天是响晴的。"
-    },
-    {
-        "id": 4,
-        "title": "背影",
-        "author": "朱自清",
-        "content": "我与父亲不相见已二年余了，我最不能忘记的是他的背影。那年冬天，祖母死了，父亲的差使也交卸了，正是祸不单行的日子。我从北京到徐州，打算跟着父亲奔丧回家。到徐州见着父亲，看见满院狼藉的东西，又想起祖母，不禁簌簌地流下眼泪。"
-    }
-]
 
 # ================= 3. 内存任务存储 =================
 
@@ -96,6 +67,29 @@ analyze_cache = {}
 CACHE_TTL = 86400  # 1天
 
 # ================= 4. Pydantic 模型 =================
+
+class AuthRegisterRequest(BaseModel):
+    email: str
+    password: str
+
+class AuthLoginRequest(BaseModel):
+    email: str
+    password: str
+
+class AuthRefreshRequest(BaseModel):
+    refresh_token: str
+
+class User(BaseModel):
+    id: str
+    email: str
+    role: str = "user"
+    created_at: Optional[str] = None
+
+class AuthSession(BaseModel):
+    access_token: str
+    refresh_token: str
+    user: User
+    expires_at: float
 
 class AnalyzeRequest(BaseModel):
     text: str
@@ -287,10 +281,148 @@ async def process_generation(task_id: str, prompts: list[str], style: str):
 
 # ================= 6. API 路由 =================
 
-@app.get("/api/texts")
-async def get_texts():
-    """获取内置课文列表"""
-    return BUILT_IN_TEXTS
+# ================= Auth API =================
+
+@app.post("/api/auth/register", response_model=AuthSession)
+async def register(request: AuthRegisterRequest):
+    """用户注册"""
+    try:
+        res = supabase.auth.sign_up({
+            "email": request.email,
+            "password": request.password
+        })
+
+        if res.user is None:
+            raise HTTPException(status_code=400, detail="注册失败")
+
+        # 获取 session
+        session = res.session
+        if session is None:
+            raise HTTPException(status_code=400, detail="注册成功但无法获取会话")
+
+        # 创建 profiles 记录
+        try:
+            supabase.table("profiles").upsert({
+                "id": res.user.id,
+                "email": res.user.email or request.email,
+                "role": "user"
+            }).execute()
+        except Exception as e:
+            print(f"⚠️ 创建 profiles 记录失败: {e}")
+
+        return AuthSession(
+            access_token=session.access_token,
+            refresh_token=session.refresh_token,
+            user=User(
+                id=res.user.id,
+                email=res.user.email or request.email,
+                role="user"
+            ),
+            expires_at=datetime.now().timestamp() + 3600
+        )
+    except Exception as e:
+        print(f"❌ 注册失败: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/auth/login", response_model=AuthSession)
+async def login(request: AuthLoginRequest):
+    """用户登录"""
+    try:
+        res = supabase.auth.sign_in_with_password({
+            "email": request.email,
+            "password": request.password
+        })
+
+        if res.user is None:
+            raise HTTPException(status_code=401, detail="登录失败")
+
+        session = res.session
+        if session is None:
+            raise HTTPException(status_code=401, detail="无法获取会话")
+
+        # 确保 profiles 记录存在
+        try:
+            supabase.table("profiles").upsert({
+                "id": res.user.id,
+                "email": res.user.email or request.email,
+                "role": "user"
+            }).execute()
+        except Exception as e:
+            print(f"⚠️ 同步 profiles 记录失败: {e}")
+
+        return AuthSession(
+            access_token=session.access_token,
+            refresh_token=session.refresh_token,
+            user=User(
+                id=res.user.id,
+                email=res.user.email or request.email,
+                role="user"
+            ),
+            expires_at=datetime.now().timestamp() + 3600
+        )
+    except Exception as e:
+        print(f"❌ 登录失败: {e}")
+        raise HTTPException(status_code=401, detail="邮箱或密码错误")
+
+
+@app.post("/api/auth/logout")
+async def logout():
+    """用户登出"""
+    try:
+        supabase.auth.sign_out()
+        return {"status": "success", "message": "已登出"}
+    except Exception as e:
+        print(f"❌ 登出失败: {e}")
+        return {"status": "success", "message": "已登出"}
+
+
+@app.post("/api/auth/refresh", response_model=AuthSession)
+async def refresh(request: AuthRefreshRequest):
+    """刷新 Token"""
+    try:
+        res = supabase.auth.refresh_session({
+            "refresh_token": request.refresh_token
+        })
+
+        if res.user is None:
+            raise HTTPException(status_code=401, detail="刷新失败")
+
+        session = res.session
+        if session is None:
+            raise HTTPException(status_code=401, detail="无法获取会话")
+
+        return AuthSession(
+            access_token=session.access_token,
+            refresh_token=session.refresh_token,
+            user=User(
+                id=res.user.id,
+                email=res.user.email or "",
+                role="user"
+            ),
+            expires_at=datetime.now().timestamp() + 3600
+        )
+    except Exception as e:
+        print(f"❌ 刷新 token 失败: {e}")
+        raise HTTPException(status_code=401, detail="刷新失败，请重新登录")
+
+
+@app.get("/api/auth/me", response_model=User)
+async def get_me():
+    """获取当前用户信息"""
+    try:
+        user = supabase.auth.get_user()
+        if user.user is None:
+            raise HTTPException(status_code=401, detail="未登录")
+
+        return User(
+            id=user.user.id,
+            email=user.user.email or "",
+            role="user"
+        )
+    except Exception as e:
+        print(f"❌ 获取用户信息失败: {e}")
+        raise HTTPException(status_code=401, detail="未登录")
 
 
 @app.post("/api/analyze", response_model=AnalyzeResponse)
@@ -405,7 +537,7 @@ async def export_work(work_id: int):
             try:
                 # 处理相对路径
                 if img_url.startswith("/"):
-                    img_url = f"http://localhost:8000{img_url}"
+                    img_url = f"http://localhost:8001{img_url}"
 
                 res = await client.get(img_url, timeout=30.0)
                 if res.status_code == 200:
@@ -643,4 +775,4 @@ async def upload_file(file: UploadFile = File(...)):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)

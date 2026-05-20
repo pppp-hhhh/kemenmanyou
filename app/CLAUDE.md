@@ -21,7 +21,6 @@ The frontend uses Nuxt server routes to proxy API calls to the backend:
 
 | File | Endpoint | Backend |
 |------|----------|---------|
-| `api/texts.get.ts` | GET `/api/texts` | `GET /api/texts` |
 | `api/analyze.post.ts` | POST `/api/analyze` | `POST /api/analyze` |
 | `api/generate.post.ts` | POST `/api/generate` | `POST /api/generate` |
 | `api/task/[taskId].get.ts` | GET `/api/task/{taskId}` | `GET /api/task/{task_id}` |
@@ -36,6 +35,11 @@ The frontend uses Nuxt server routes to proxy API calls to the backend:
 | `api/lessons.post.ts` | POST `/api/lessons` | `POST /api/lessons` |
 | `api/lessons/[id].put.ts` | PUT `/api/lessons/{id}` | `PUT /api/lessons/{lesson_id}` |
 | `api/lessons/[id].delete.ts` | DELETE `/api/lessons/{id}` | `DELETE /api/lessons/{lesson_id}` |
+| `api/auth/login.post.ts` | POST `/api/auth/login` | `POST /api/auth/login` |
+| `api/auth/register.post.ts` | POST `/api/auth/register` | `POST /api/auth/register` |
+| `api/auth/logout.post.ts` | POST `/api/auth/logout` | `POST /api/auth/logout` |
+| `api/auth/refresh.post.ts` | POST `/api/auth/refresh` | `POST /api/auth/refresh` |
+| `api/auth/me.get.ts` | GET `/api/auth/me` | `GET /api/auth/me` |
 
 ## State Management
 

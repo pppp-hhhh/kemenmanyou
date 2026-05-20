@@ -3,7 +3,7 @@ export default defineEventHandler(async (event): Promise<any> => {
 
   const response = await $fetch(`/api/lessons/${id}`, {
     method: 'DELETE',
-    baseURL: 'http://localhost:8000',
+    baseURL: 'http://localhost:8001',
   })
 
   return response

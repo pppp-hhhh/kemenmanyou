@@ -24,13 +24,13 @@ export default defineNuxtConfig({
     },
   },
 
-  // API 代理配置
-  nitro: {
-    routeRules: {
-      '/api/**': { proxy: 'http://localhost:8000/**' },
-      '/static/**': { proxy: 'http://localhost:8000/**' },
-    },
-  },
+  // API 代理配置 - 已禁用，改用 server routes 直接调用
+  // nitro: {
+  //   routeRules: {
+  //     '/api/**': { proxy: 'http://localhost:8000/**' },
+  //     '/static/**': { proxy: 'http://localhost:8000/**' },
+  //   },
+  // },
 
   // 路由规则
   routeRules: {

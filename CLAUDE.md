@@ -10,13 +10,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```
 ┌─────────────────────────────────────────────┐
-│          前端 (Nuxt 4) — frontend-workspace  │
+│          前端 (Nuxt 4) — app/                │
 │  ┌─────────────┐  ┌─────────────────────┐   │
 │  │  工作台      │  │    展示广场          │   │
 │  │  (CSR)      │  │    (SSR/SSG)         │   │
 │  └─────────────┘  └─────────────────────┘   │
 └────────────────────┬────────────────────────┘
-                     │ HTTP API (代理 /api)
+                     │ HTTP API (server routes)
                      ▼
 ┌─────────────────────────────────────────────┐
 │           后端 API (FastAPI)                 │
@@ -60,16 +60,15 @@ kemenmanyou/
 
 ## Backend (lzl)
 
-- **URL**: `http://localhost:8000`
-- **Swagger**: `http://localhost:8000/docs`
-- **Start**: `cd server && uvicorn main:app --reload --host 0.0.0.0 --port 8000`
+- **URL**: `http://localhost:8001`
+- **Swagger**: `http://localhost:8001/docs`
+- **Start**: `cd server && uvicorn main:app --reload --host 0.0.0.0 --port 8001`
 - **Database**: Supabase (PostgreSQL)
 
 ### Key API Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/texts` | List built-in textbooks |
 | POST | `/api/analyze` | Analyze text with DeepSeek → scene list |
 | POST | `/api/generate` | Submit batch image generation task |
 | GET | `/api/task/{task_id}` | Poll task status |
@@ -79,6 +78,11 @@ kemenmanyou/
 | POST | `/api/lessons` | Add lesson to Supabase |
 | GET | `/api/lessons` | Get all lessons |
 | POST | `/api/upload` | Upload image file |
+| POST | `/api/auth/register` | User registration |
+| POST | `/api/auth/login` | User login |
+| POST | `/api/auth/logout` | User logout |
+| POST | `/api/auth/refresh` | Refresh token |
+| GET | `/api/auth/me` | Get current user |
 
 ### Backend Tech Stack
 
@@ -95,16 +99,21 @@ kemenmanyou/
 
 - **Framework**: Nuxt 4 + Vue 3 + Pinia + Tailwind CSS + Nuxt UI + nuxt-icon
 - **Rendering**: Workspace (CSR), Gallery (SSR/SSG)
-- **Proxy**: Nuxt Nitro proxies `/api` → `http://localhost:8000`
-- **State**: Pinia stores (`stores/workspace.ts`)
+- **API**: Nuxt server routes proxy to backend (no Nitro routeRules proxy)
+- **State**: Pinia stores (`stores/auth.ts`, `stores/workspace.ts`)
+- **Auth**: Client-side plugin (`plugins/auth.ts`) initializes from localStorage
 
 ### Routes
 
 | Route | Owner | Rendering | Description |
 |-------|-------|-----------|-------------|
+| `/` | - | SSR | Homepage with redirects |
 | `/workspace` | ph | CSR | Main workspace (text input, AI analysis, scene editing, generation) |
 | `/gallery` | zgl | SSR/SSG | Public works gallery with filtering |
 | `/watch/{id}` | zgl | SSR | Comic reader with image grid |
+| `/login` | - | CSR | User login |
+| `/register` | - | CSR | User registration |
+| `/my-works` | - | CSR | User's own works (requires auth) |
 
 ### Composables
 
@@ -143,7 +152,6 @@ Scenes list ←────────                          → Poll GET /a
 
 ## Key Constraints
 
-- **Phase 1**: No user authentication (user_id=0 for anonymous saves)
 - **Text limit**: ≤3000 characters per analysis
 - **Scene limit**: Max 30 scenes per work
 - **Concurrency**: Max 2 simultaneous image generations (Semaphore)
