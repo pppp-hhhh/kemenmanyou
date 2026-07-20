@@ -1,195 +1,225 @@
 <template>
-  <div class="max-w-7xl mx-auto">
-    <div class="flex items-center gap-4 mb-6">
-      <NuxtLink to="/admin" class="text-gray-500 hover:text-gray-700 dark:text-gray-400">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
-        </svg>
+  <div class="max-w-editorial mx-auto px-6 lg:px-12 py-10">
+    <!-- 顶部版心 -->
+    <section class="mb-8 pb-6 border-b border-ink-500/15 dark:border-paper-300/10">
+      <NuxtLink to="/admin" class="inline-flex items-center gap-2 text-ink-500 dark:text-paper-300 hover:text-cinnabar-600 dark:hover:text-cinnabar-400 transition-colors font-kai text-sm mb-4 group">
+        <span class="font-latin italic group-hover:-translate-x-1 transition-transform">←</span>
+        <span>返 卷宗</span>
       </NuxtLink>
-      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">作品管理</h1>
-    </div>
+      <div class="flex items-center gap-3 mb-3">
+        <div class="folio">卷 · 贰</div>
+        <div class="brush-divider w-24"></div>
+        <div class="font-latin italic text-xs text-cinnabar-600 dark:text-cinnabar-400 tracking-seal">II. WORKS</div>
+      </div>
+      <div class="flex items-end justify-between flex-wrap gap-4">
+        <h1 class="font-display text-5xl md:text-6xl text-ink-700 dark:text-paper-50 leading-none">
+          入<span class="brush-underline text-cinnabar-600 dark:text-cinnabar-400">册</span>
+        </h1>
+        <p class="font-kai text-sm text-ink-500 dark:text-paper-300">
+          众画之卷 · 待审 / 已展 / 被拒
+        </p>
+      </div>
+    </section>
 
-    <!-- Filters & Search -->
-    <div class="bg-white dark:bg-gray-800 rounded-xl shadow p-4 mb-6">
-      <div class="flex flex-wrap items-center gap-4">
-        <!-- Status Filter -->
-        <select
-          v-model="filters.status"
-          @change="handleFilterChange"
-          class="px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
-        >
-          <option value="all">全部状态</option>
-          <option value="pending">待审核</option>
-          <option value="approved">已批准</option>
-          <option value="rejected">已拒绝</option>
-        </select>
-
-        <!-- Search -->
+    <!-- 筛选 + 批量操作 -->
+    <section class="paper-panel p-5 mb-5">
+      <div class="flex flex-wrap items-center gap-3">
+        <div>
+          <label class="block font-latin italic text-[10px] text-ink-400 dark:text-paper-400 tracking-seal mb-1.5">
+            STATUS · 状态
+          </label>
+          <select v-model="filters.status" @change="handleFilterChange" class="input-editorial">
+            <option value="all">全部</option>
+            <option value="pending">待审</option>
+            <option value="approved">已展</option>
+            <option value="rejected">被拒</option>
+          </select>
+        </div>
         <div class="flex-1 min-w-[200px]">
+          <label class="block font-latin italic text-[10px] text-ink-400 dark:text-paper-400 tracking-seal mb-1.5">
+            SEARCH · 搜标题
+          </label>
           <input
             v-model="filters.search"
             @keyup.enter="handleSearch"
             type="text"
-            placeholder="搜索作品标题..."
-            class="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+            placeholder="输入后回车..."
+            class="input-editorial w-full"
           />
         </div>
 
-        <!-- Batch Actions -->
-        <div v-if="selectedIds.length > 0" class="flex items-center gap-2">
-          <span class="text-sm text-gray-500">{{ selectedIds.length }} 已选择</span>
-          <button
-            @click="handleBatchApprove"
-            :disabled="processing"
-            class="px-3 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white text-sm rounded-lg"
-          >
-            批量批准
+        <div v-if="selectedIds.length > 0" class="flex items-center gap-2 px-4 py-2 bg-cinnabar-50 dark:bg-cinnabar-900/15 border border-cinnabar-500/30 self-end">
+          <span class="font-display text-cinnabar-600 dark:text-cinnabar-400">{{ selectedIds.length }}</span>
+          <span class="font-kai text-xs text-ink-500 dark:text-paper-300">已择</span>
+          <button @click="handleBatchApprove" :disabled="processing" class="font-kai text-xs text-bamboo-600 dark:text-bamboo-400 hover:underline disabled:opacity-40">
+            批展
           </button>
-          <button
-            @click="handleBatchReject"
-            :disabled="processing"
-            class="px-3 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white text-sm rounded-lg"
-          >
-            批量拒绝
+          <span class="font-latin italic text-ink-300 dark:text-paper-400">·</span>
+          <button @click="handleBatchReject" :disabled="processing" class="font-kai text-xs text-cinnabar-600 dark:text-cinnabar-400 hover:underline disabled:opacity-40">
+            批拒
           </button>
-          <button
-            @click="handleBatchDelete"
-            :disabled="processing"
-            class="px-3 py-2 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-400 text-white text-sm rounded-lg"
-          >
-            批量删除
+          <span class="font-latin italic text-ink-300 dark:text-paper-400">·</span>
+          <button @click="handleBatchDelete" :disabled="processing" class="font-kai text-xs text-ink-500 dark:text-paper-300 hover:text-cinnabar-600 dark:hover:text-cinnabar-400 hover:underline disabled:opacity-40">
+            批销
           </button>
         </div>
       </div>
+    </section>
+
+    <!-- 全选 -->
+    <section class="flex items-center gap-3 mb-4 px-2">
+      <label class="flex items-center gap-2 cursor-pointer group">
+        <input
+          type="checkbox"
+          v-model="selectAll"
+          @change="toggleSelectAll"
+          class="w-4 h-4 accent-cinnabar-600"
+        />
+        <span class="font-kai text-sm text-ink-500 dark:text-paper-300 group-hover:text-cinnabar-600 dark:group-hover:text-cinnabar-400 transition-colors">全择</span>
+      </label>
+      <div class="brush-divider flex-1"></div>
+      <span class="font-latin italic text-[10px] text-ink-400 dark:text-paper-400 tracking-seal">
+        {{ works.length }} ITEMS
+      </span>
+    </section>
+
+    <!-- 加载 -->
+    <div v-if="loading" class="text-center py-24">
+      <div class="inline-flex items-center gap-3 mb-3">
+        <svg class="animate-spin h-6 w-6 text-cinnabar-500" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+        </svg>
+        <span class="font-kai text-sm text-ink-400 dark:text-paper-300">正在翻阅画册...</span>
+      </div>
+      <div class="font-latin italic text-xs text-ink-300 dark:text-paper-400 tracking-widest">LOADING</div>
     </div>
 
-    <!-- Select All -->
-    <div class="flex items-center gap-2 mb-4">
-      <input
-        type="checkbox"
-        v-model="selectAll"
-        @change="toggleSelectAll"
-        class="w-5 h-5 rounded border-gray-300"
-      />
-      <span class="text-sm text-gray-600 dark:text-gray-400">全选</span>
+    <!-- 空 -->
+    <div v-else-if="works.length === 0" class="text-center py-24 paper-panel paper-panel-edge">
+      <div class="seal-outline mx-auto mb-4" style="width: 5rem; height: 5rem; padding: 0.5rem; font-size: 1.4rem; line-height: 1.2; writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 0.05em;">
+        空<br>册
+      </div>
+      <p class="font-kai text-sm text-ink-400 dark:text-paper-300">尚无作品</p>
     </div>
 
-    <!-- Loading -->
-    <div v-if="loading" class="text-center py-12">
-      <svg class="animate-spin h-8 w-8 mx-auto text-indigo-600" viewBox="0 0 24 24">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-      </svg>
-      <p class="text-gray-500 mt-4">加载中...</p>
-    </div>
-
-    <!-- Empty -->
-    <div v-else-if="works.length === 0" class="text-center py-12 bg-white dark:bg-gray-800 rounded-2xl">
-      <p class="text-gray-500">暂无作品</p>
-    </div>
-
-    <!-- Works List -->
-    <div v-else class="space-y-4">
+    <!-- 作品列表 -->
+    <div v-else class="space-y-3">
       <div
         v-for="work in works"
         :key="work.id"
-        class="bg-white dark:bg-gray-800 rounded-xl shadow p-4 flex items-center gap-4"
+        class="paper-panel paper-panel-edge p-4 flex items-center gap-4 hover:-translate-y-0.5 transition-transform"
       >
+        <!-- 选择 -->
         <input
           type="checkbox"
           :checked="selectedIds.includes(work.id)"
           @change="toggleSelect(work.id)"
-          class="w-5 h-5 rounded border-gray-300"
+          class="w-4 h-4 accent-cinnabar-600 flex-shrink-0"
         />
 
-        <div class="w-24 h-18 bg-gray-100 dark:bg-gray-700 rounded-lg overflow-hidden flex-shrink-0">
+        <!-- 封面 -->
+        <div class="w-24 h-24 bg-paper-200 dark:bg-ink-500 overflow-hidden flex-shrink-0 relative">
           <img
             v-if="work.thumbnail"
             :src="work.thumbnail"
             :alt="work.title"
             class="w-full h-full object-cover"
           />
+          <div v-else class="w-full h-full flex items-center justify-center">
+            <span class="font-display text-3xl text-ink-500/15 dark:text-paper-300/15">无</span>
+          </div>
         </div>
 
+        <!-- 信息 -->
         <div class="flex-1 min-w-0">
-          <h3 class="font-medium text-gray-900 dark:text-white truncate">{{ work.title || '无标题' }}</h3>
-          <div class="flex items-center gap-2 mt-1">
-            <span class="text-xs px-2 py-1 bg-indigo-100 dark:bg-indigo-900 text-indigo-600 dark:text-indigo-400 rounded">
-              {{ work.style }}
-            </span>
-            <span
-              :class="{
-                'bg-yellow-100 text-yellow-600': work.review_status === 'pending',
-                'bg-green-100 text-green-600': work.review_status === 'approved',
-                'bg-red-100 text-red-600': work.review_status === 'rejected'
-              }"
-              class="text-xs px-2 py-1 rounded"
-            >
-              {{ reviewStatusText(work.review_status) }}
-            </span>
-            <span class="text-xs text-gray-500">
-              {{ work.scenes?.length || 0 }} 场景
+          <div class="flex items-center gap-3 mb-1">
+            <h3 class="font-display text-base text-ink-700 dark:text-paper-50 truncate">
+              {{ work.title || '无题' }}
+            </h3>
+            <span :class="reviewStatusSeal(work.review_status).cls + ' text-[10px] flex-shrink-0'">
+              {{ reviewStatusSeal(work.review_status).glyph }}
             </span>
           </div>
-          <p class="text-xs text-gray-500 mt-1">
-            {{ new Date(work.created_at).toLocaleDateString('zh-CN') }}
-          </p>
+
+          <div class="flex items-center gap-3 flex-wrap">
+            <span class="seal-outline text-[10px]">{{ work.style }}</span>
+            <span class="font-kai text-xs text-ink-400 dark:text-paper-400">
+              {{ reviewStatusText(work.review_status) }}
+            </span>
+            <span class="font-latin italic text-[10px] text-ink-400 dark:text-paper-400">
+              {{ work.scenes?.length || 0 }} SCENES
+            </span>
+            <span class="font-latin italic text-[10px] text-ink-400 dark:text-paper-400">
+              {{ new Date(work.created_at).toLocaleDateString('zh-CN') }}
+            </span>
+          </div>
         </div>
 
-        <div class="flex gap-2">
+        <!-- 操作 -->
+        <div class="flex gap-2 flex-shrink-0">
           <template v-if="work.review_status === 'pending'">
             <button
               @click="handleApprove(work.id)"
               :disabled="processingId === work.id"
-              class="px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white text-sm rounded-lg transition"
+              class="btn-cinnabar px-3 py-1.5 text-xs disabled:opacity-40"
             >
-              批准
+              <span class="font-kai">展</span>
             </button>
             <button
               @click="handleReject(work.id)"
               :disabled="processingId === work.id"
-              class="px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white text-sm rounded-lg transition"
+              class="btn-outline px-3 py-1.5 text-xs disabled:opacity-40"
             >
-              拒绝
+              <span class="font-kai">拒</span>
             </button>
           </template>
           <NuxtLink
             :to="`/watch/${work.id}`"
             target="_blank"
-            class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 text-sm rounded-lg transition"
+            class="btn-outline px-3 py-1.5 text-xs"
           >
-            查看
+            <span class="font-latin italic">VIEW</span>
           </NuxtLink>
           <button
             @click="handleDelete(work.id)"
             :disabled="processingId === work.id"
-            class="px-3 py-1.5 bg-gray-100 hover:bg-red-100 dark:bg-gray-700 dark:hover:bg-red-900 text-red-600 dark:text-red-400 text-sm rounded-lg transition"
+            class="font-kai text-xs text-cinnabar-600 dark:text-cinnabar-400 hover:underline disabled:opacity-40 px-2"
           >
-            删除
+            销
           </button>
         </div>
       </div>
     </div>
 
-    <!-- Pagination -->
-    <div v-if="totalPages > 1" class="flex justify-center gap-2 mt-6">
+    <!-- 分页 -->
+    <div v-if="totalPages > 1" class="flex justify-center items-center gap-4 mt-8">
       <button
         @click="changePage(currentPage - 1)"
         :disabled="currentPage === 1"
-        class="px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 rounded-lg transition disabled:opacity-50"
+        class="btn-outline px-4 py-2 disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        上一页
+        <span class="font-latin italic text-xs">← PREV</span>
       </button>
-      <span class="px-4 py-2 text-gray-600 dark:text-gray-400">
-        {{ currentPage }} / {{ totalPages }}
+      <span class="font-kai text-xs text-ink-500 dark:text-paper-300">
+        <span class="font-display text-cinnabar-600 dark:text-cinnabar-400">{{ currentPage }}</span>
+        <span class="font-latin italic mx-1">/</span>
+        <span class="font-display text-ink-700 dark:text-paper-50">{{ totalPages }}</span>
       </span>
       <button
         @click="changePage(currentPage + 1)"
         :disabled="currentPage === totalPages"
-        class="px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 rounded-lg transition disabled:opacity-50"
+        class="btn-outline px-4 py-2 disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        下一页
+        <span class="font-latin italic text-xs">NEXT →</span>
       </button>
+    </div>
+
+    <!-- 落款 -->
+    <div class="mt-16 flex items-center justify-center gap-3">
+      <div class="brush-divider w-32"></div>
+      <div class="seal seal-tag text-xs">入 · 册</div>
+      <div class="brush-divider w-32"></div>
     </div>
   </div>
 </template>
@@ -252,11 +282,18 @@ const fetchWorks = async () => {
 
 const reviewStatusText = (status: string) => {
   const map: Record<string, string> = {
-    pending: '待审核',
-    approved: '已批准',
-    rejected: '已拒绝'
+    pending: '待审',
+    approved: '已展',
+    rejected: '被拒'
   }
   return map[status] || status
+}
+
+const reviewStatusSeal = (status: string) => {
+  if (status === 'pending') return { cls: 'seal-outline', glyph: '待' }
+  if (status === 'approved') return { cls: 'seal seal-tag', glyph: '展' }
+  if (status === 'rejected') return { cls: 'seal seal-tag', glyph: '拒' }
+  return { cls: 'seal-outline', glyph: '?' }
 }
 
 const handleFilterChange = () => {
@@ -324,7 +361,7 @@ const handleBatchReject = () => {
   handleBatchAction('reject', reason)
 }
 const handleBatchDelete = () => {
-  if (confirm(`确定要删除选中的 ${selectedIds.value.length} 个作品吗？`)) {
+  if (confirm(`确定要销册选中的 ${selectedIds.value.length} 个作品吗？`)) {
     handleBatchAction('delete')
   }
 }
@@ -362,7 +399,7 @@ const handleReject = async (id: number) => {
 }
 
 const handleDelete = async (id: number) => {
-  if (!confirm('确定要删除这个作品吗？')) return
+  if (!confirm('确定要销册此作品吗？')) return
 
   processingId.value = id
   try {

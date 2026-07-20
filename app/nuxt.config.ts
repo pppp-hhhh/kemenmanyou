@@ -5,8 +5,27 @@ export default defineNuxtConfig({
 
   app: {
     head: {
+      title: '课文漫游 · 画册',
+      htmlAttrs: { lang: 'zh-CN' },
       link: [
         { rel: 'icon', type: 'image/png', href: '/logo3.png' },
+        // 思源宋体（显示标题）
+        { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
+        { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
+        {
+          rel: 'stylesheet',
+          href: 'https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;700;900&display=swap',
+        },
+        // 拉丁衬线（数字、英文）
+        {
+          rel: 'stylesheet',
+          href: 'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Fraunces:ital,wght@0,400;0,600;1,400&display=swap',
+        },
+        // 霞鹜文楷（正文）
+        {
+          rel: 'stylesheet',
+          href: 'https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/style.css',
+        },
       ],
     },
   },
@@ -23,14 +42,6 @@ export default defineNuxtConfig({
       supabaseUrl: 'https://sxxngtcljzwhvajubwno.supabase.co',
     },
   },
-
-  // API 代理配置 - 已禁用，改用 server routes 直接调用
-  // nitro: {
-  //   routeRules: {
-  //     '/api/**': { proxy: 'http://localhost:8000/**' },
-  //     '/static/**': { proxy: 'http://localhost:8000/**' },
-  //   },
-  // },
 
   // 路由规则
   routeRules: {
