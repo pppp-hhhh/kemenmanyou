@@ -8,7 +8,7 @@ import uuid
 import hashlib
 from datetime import datetime
 from typing import Optional
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Header
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -33,8 +33,8 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # ================= 1. 配置区 =================
 
 # --- Supabase 配置 ---
-SUPABASE_URL = "https://yvhjcqnsvrnjejwgdrlr.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2aGpjcW5zdnJuamVqd2dkcmxyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5OTQ4MjIsImV4cCI6MjA5MzU3MDgyMn0.7Fb_w64OvFjkhqGde8fPk_w2Qv446RBZXJCues0SdB4"
+SUPABASE_URL = "https://sxxngtcljzwhvajubwno.supabase.co"
+SUPABASE_KEY = "sb_publishable_p8dfH6Su7mQ13TeQfqvCRg_dKdQHWqz"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- DeepSeek 配置 ---
@@ -300,15 +300,17 @@ async def register(request: AuthRegisterRequest):
         if session is None:
             raise HTTPException(status_code=400, detail="注册成功但无法获取会话")
 
-        # 创建 profiles 记录
+        # profiles 记录由数据库 trigger on_auth_user_created 自动创建，无需手动 upsert
+        # 仅在 trigger 未生效时兜底（避免重发 trigger 已存在的情况）
         try:
-            supabase.table("profiles").upsert({
-                "id": res.user.id,
-                "email": res.user.email or request.email,
-                "role": "user"
-            }).execute()
+            existing = supabase.table("profiles").select("id").eq("id", res.user.id).execute()
+            if not existing.data:
+                supabase.table("profiles").insert({
+                    "id": res.user.id,
+                    "email": res.user.email or request.email
+                }).execute()
         except Exception as e:
-            print(f"⚠️ 创建 profiles 记录失败: {e}")
+            print(f"⚠️ profiles 兜底创建失败（可能由 trigger 已处理）: {e}")
 
         return AuthSession(
             access_token=session.access_token,
@@ -341,13 +343,18 @@ async def login(request: AuthLoginRequest):
         if session is None:
             raise HTTPException(status_code=401, detail="无法获取会话")
 
-        # 确保 profiles 记录存在
+        # 确保 profiles 记录存在（trigger 应已创建，此处为兜底）
         try:
-            supabase.table("profiles").upsert({
-                "id": res.user.id,
-                "email": res.user.email or request.email,
-                "role": "user"
-            }).execute()
+            existing = supabase.table("profiles").select("id").eq("id", res.user.id).execute()
+            if not existing.data:
+                supabase.table("profiles").insert({
+                    "id": res.user.id,
+                    "email": res.user.email or request.email
+                }).execute()
+            # 更新最后登录时间
+            supabase.table("profiles").update({
+                "last_login_at": datetime.now().isoformat()
+            }).eq("id", res.user.id).execute()
         except Exception as e:
             print(f"⚠️ 同步 profiles 记录失败: {e}")
 
@@ -471,20 +478,51 @@ async def get_task_status(task_id: str):
 
 
 @app.post("/api/works", response_model=SaveWorkResponse)
-async def save_work(request: SaveWorkRequest):
+async def save_work(request: SaveWorkRequest, authorization: Optional[str] = Header(None)):
     """保存作品到 Supabase"""
     try:
-        res = supabase.table("works").insert({
+        # 从 token 解析 user_id（Python 后端用 anon key，必须显式提取 user_id 写入）
+        user_id = None
+        author_name = None
+        if authorization and authorization.startswith("Bearer "):
+            try:
+                token = authorization.replace("Bearer ", "")
+                # 用 user 而非 admin 拿用户信息
+                user_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+                user_client.auth.set_session(token, "")
+                user_resp = user_client.auth.get_user(token)
+                if user_resp and user_resp.user:
+                    user_id = user_resp.user.id
+                    user_email = user_resp.user.email or ""
+                    # 取 display_name 作为作者名
+                    try:
+                        p = supabase.table("profiles").select("display_name").eq("id", user_id).execute()
+                        if p.data:
+                            author_name = p.data[0].get("display_name") or user_email.split("@")[0]
+                        else:
+                            author_name = user_email.split("@")[0]
+                    except Exception:
+                        author_name = user_email.split("@")[0]
+            except Exception as e:
+                print(f"⚠️ 解析用户身份失败: {e}")
+
+        insert_data = {
             "title": request.custom_title or f"课文漫画 - {datetime.now().strftime('%Y-%m-%d')}",
             "text_id": request.text_id,
             "custom_content": request.custom_content,
             "thumbnail": request.thumbnail,
             "scenes": [s.model_dump() for s in request.scenes],
-            "images": json.dumps(request.images),
+            "images": request.images,  # JSONB 列直接传 list
             "style": request.style,
             "is_public": request.is_public,
             "view_count": 0
-        }).execute()
+        }
+        if user_id:
+            insert_data["user_id"] = user_id
+        if author_name:
+            insert_data["author_name"] = author_name
+
+        res = supabase.table("works").insert(insert_data).execute()
 
         work_id = res.data[0].get("id") if res.data else random.randint(1000, 9999)
         return SaveWorkResponse(work_id=work_id, message="作品保存成功")
@@ -496,16 +534,30 @@ async def save_work(request: SaveWorkRequest):
 
 @app.get("/api/works/public")
 async def get_public_works():
-    """获取公开作品列表"""
-    res = supabase.table("works").select("*").eq("is_public", True).order("created_at", desc=True).limit(50).execute()
+    """获取公开作品列表（仅审核通过的）"""
+    res = (
+        supabase.table("works")
+        .select("*")
+        .eq("is_public", True)
+        .eq("review_status", "approved")
+        .is_("deleted_at", "null")
+        .order("created_at", desc=True)
+        .limit(50)
+        .execute()
+    )
     return res.data
 
 
 @app.get("/api/works/{work_id}")
 async def get_work(work_id: int):
     """获取作品详情"""
-    res = supabase.table("works").select("*").eq("id", work_id).execute()
+    res = supabase.table("works").select("*").eq("id", work_id).is_("deleted_at", "null").execute()
     if res.data:
+        # 原子自增 view_count
+        try:
+            supabase.rpc("increment_work_view", {"work_id": work_id}).execute()
+        except Exception as e:
+            print(f"⚠️ view_count 自增失败: {e}")
         return res.data[0]
     raise HTTPException(status_code=404, detail="作品不存在")
 
@@ -588,13 +640,11 @@ class AddLessonRequest(BaseModel):
 
 @app.post("/api/lessons")
 async def add_lesson(request: AddLessonRequest):
-    """添加课文到 Supabase lessons 表"""
+    """添加课文到 Supabase lessons 表（仅课文库，不含状态/图片）"""
     try:
         data = {
             "title": request.title,
             "content": request.content,
-            "status": "pending",
-            "image_url": ""
         }
         if request.user_id:
             data["user_id"] = request.user_id
@@ -641,11 +691,13 @@ class UpdateWorkRequest(BaseModel):
     scenes: Optional[list] = None
     images: Optional[list] = None
     is_public: Optional[bool] = None
+    tags: Optional[list] = None
+    thumbnail: Optional[str] = None
 
 @app.get("/api/works")
 async def get_all_works():
-    """获取所有作品"""
-    res = supabase.table("works").select("*").order("created_at", desc=True).execute()
+    """获取所有作品（仅未软删除的）"""
+    res = supabase.table("works").select("*").is_("deleted_at", "null").order("created_at", desc=True).execute()
     return res.data
 
 @app.put("/api/works/{work_id}")
@@ -660,9 +712,13 @@ async def update_work(work_id: int, request: UpdateWorkRequest):
         if request.scenes is not None:
             update_data["scenes"] = request.scenes
         if request.images is not None:
-            update_data["images"] = request.images if isinstance(request.images, list) else json.loads(request.images)
+            update_data["images"] = request.images  # JSONB 列直接传 list
         if request.is_public is not None:
             update_data["is_public"] = request.is_public
+        if request.tags is not None:
+            update_data["tags"] = request.tags
+        if request.thumbnail is not None:
+            update_data["thumbnail"] = request.thumbnail
 
         if not update_data:
             raise HTTPException(status_code=400, detail="没有要更新的字段")
@@ -679,9 +735,9 @@ async def update_work(work_id: int, request: UpdateWorkRequest):
 
 @app.delete("/api/works/{work_id}")
 async def delete_work(work_id: int):
-    """删除作品"""
+    """删除作品（软删除）"""
     try:
-        res = supabase.table("works").delete().eq("id", work_id).execute()
+        res = supabase.table("works").update({"deleted_at": datetime.now().isoformat()}).eq("id", work_id).execute()
         if not res.data:
             raise HTTPException(status_code=404, detail="作品不存在")
         return {"status": "success", "message": "删除成功"}
@@ -694,13 +750,14 @@ async def delete_work(work_id: int):
 class UpdateLessonRequest(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
-    status: Optional[str] = None
+    grade: Optional[str] = None
+    source: Optional[str] = None
 
 @app.get("/api/lessons")
 async def get_all_lessons():
-    """获取所有课文"""
+    """获取所有课文（仅未软删除的）"""
     try:
-        res = supabase.table("lessons").select("*").order("created_at", desc=True).execute()
+        res = supabase.table("lessons").select("*").is_("deleted_at", "null").order("created_at", desc=True).execute()
         return res.data
     except Exception as e:
         print(f"⚠️ 获取课文列表失败: {e}")
@@ -715,8 +772,10 @@ async def update_lesson(lesson_id: int, request: UpdateLessonRequest):
             update_data["title"] = request.title
         if request.content is not None:
             update_data["content"] = request.content
-        if request.status is not None:
-            update_data["status"] = request.status
+        if request.grade is not None:
+            update_data["grade"] = request.grade
+        if request.source is not None:
+            update_data["source"] = request.source
 
         if not update_data:
             raise HTTPException(status_code=400, detail="没有要更新的字段")
@@ -733,9 +792,9 @@ async def update_lesson(lesson_id: int, request: UpdateLessonRequest):
 
 @app.delete("/api/lessons/{lesson_id}")
 async def delete_lesson(lesson_id: int):
-    """删除课文"""
+    """删除课文（软删除）"""
     try:
-        res = supabase.table("lessons").delete().eq("id", lesson_id).execute()
+        res = supabase.table("lessons").update({"deleted_at": datetime.now().isoformat()}).eq("id", lesson_id).execute()
         if not res.data:
             raise HTTPException(status_code=404, detail="课文不存在")
         return {"status": "success", "message": "删除成功"}
