@@ -58,3 +58,6 @@ frontend-workspace/node_modules/
 server/__pycache__/
 server/*.pyc
 server/.venv/
+
+# CodeGraph index
+.codegraph/
