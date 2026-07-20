@@ -49,6 +49,28 @@
               />
             </div>
 
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                邀请码 <span class="text-gray-400 font-normal">（选填，填写后注册为管理员）</span>
+              </label>
+              <input
+                v-model="inviteCode"
+                type="text"
+                placeholder="如有邀请码请填写"
+                @blur="verifyInvite"
+                class="w-full px-4 py-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+              />
+              <p v-if="inviteStatus === 'valid'" class="text-xs text-green-600 mt-1">
+                ✓ 邀请码有效，注册后将获得管理员身份
+              </p>
+              <p v-else-if="inviteStatus === 'invalid'" class="text-xs text-red-600 mt-1">
+                ✗ 邀请码无效或已过期
+              </p>
+              <p v-else-if="inviteStatus === 'checking'" class="text-xs text-gray-400 mt-1">
+                校验中...
+              </p>
+            </div>
+
             <div v-if="error" class="text-red-500 text-sm text-center">
               {{ error }}
             </div>
@@ -89,6 +111,8 @@ const router = useRouter()
 const email = ref('')
 const password = ref('')
 const confirmPassword = ref('')
+const inviteCode = ref('')
+const inviteStatus = ref<'idle' | 'checking' | 'valid' | 'invalid'>('idle')
 const loading = ref(false)
 const error = ref('')
 
@@ -110,10 +134,19 @@ const handleRegister = async () => {
     return
   }
 
+  // 提交前再校验一次邀请码（如果用户填写了但还没 blur）
+  if (inviteCode.value && inviteStatus.value !== 'valid') {
+    await verifyInvite()
+    if (inviteStatus.value === 'invalid') {
+      error.value = '邀请码无效或已过期'
+      return
+    }
+  }
+
   loading.value = true
 
   try {
-    const result = await authStore.register(email.value, password.value)
+    const result = await authStore.register(email.value, password.value, inviteCode.value)
 
     if (result.success) {
       router.push('/workspace')
@@ -123,5 +156,27 @@ const handleRegister = async () => {
   } finally {
     loading.value = false
   }
+}
+
+// 实时校验邀请码（防抖 500ms）
+let verifyTimer: any = null
+const verifyInvite = () => {
+  if (verifyTimer) clearTimeout(verifyTimer)
+  if (!inviteCode.value) {
+    inviteStatus.value = 'idle'
+    return
+  }
+  inviteStatus.value = 'checking'
+  verifyTimer = setTimeout(async () => {
+    try {
+      const res = await $fetch<{ valid: boolean }>('/api/auth/verify-invite', {
+        method: 'POST',
+        body: { code: inviteCode.value },
+      })
+      inviteStatus.value = res.valid ? 'valid' : 'invalid'
+    } catch {
+      inviteStatus.value = 'invalid'
+    }
+  }, 500)
 }
 </script>

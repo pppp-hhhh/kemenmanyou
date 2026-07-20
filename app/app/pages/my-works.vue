@@ -67,6 +67,12 @@
               {{ reviewStatusText(work.review_status) }}
             </span>
           </div>
+          <div
+            v-if="work.review_status === 'rejected' && work.reject_reason"
+            class="mt-2 p-2 bg-red-50 dark:bg-red-900/20 rounded text-xs text-red-600 dark:text-red-400"
+          >
+            拒绝原因：{{ work.reject_reason }}
+          </div>
           <div class="flex items-center gap-2 mt-4">
             <NuxtLink
               :to="`/watch/${work.id}`"

@@ -18,9 +18,9 @@ export default defineNuxtConfig({
 
   // 运行时配置
   runtimeConfig: {
-    supabaseKey: process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2aGpjcW5zdnJuamVqd2dkcmxyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5OTQ4MjIsImV4cCI6MjA5MzU3MDgyMn0.7Fb_w64OvFjkhqGde8fPk_w2Qv446RBZXJCues0SdB4',
+    supabaseKey: process.env.SUPABASE_KEY || 'sb_publishable_p8dfH6Su7mQ13TeQfqvCRg_dKdQHWqz',
     public: {
-      supabaseUrl: 'https://yvhjcqnsvrnjejwgdrlr.supabase.co',
+      supabaseUrl: 'https://sxxngtcljzwhvajubwno.supabase.co',
     },
   },
 

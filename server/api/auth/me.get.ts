@@ -1,5 +1,5 @@
 export default defineEventHandler(async (event) => {
-  const supabaseUrl = 'https://yvhjcqnsvrnjejwgdrlr.supabase.co'
+  const supabaseUrl = 'https://sxxngtcljzwhvajubwno.supabase.co'
   const supabaseKey = useRuntimeConfig().supabaseKey
 
   // Get user info from Supabase Auth

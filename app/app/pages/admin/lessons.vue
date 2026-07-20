@@ -61,7 +61,8 @@
           <tr>
             <th class="px-6 py-3 w-10"></th>
             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">标题</th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">状态</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">年级</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">来源</th>
             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">创建时间</th>
             <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">操作</th>
           </tr>
@@ -80,18 +81,11 @@
               <div class="text-sm font-medium text-gray-900 dark:text-white">{{ lesson.title }}</div>
               <div class="text-sm text-gray-500 dark:text-gray-400 truncate max-w-xs">{{ lesson.content?.slice(0, 50) }}...</div>
             </td>
-            <td class="px-6 py-4 whitespace-nowrap">
-              <span
-                :class="{
-                  'bg-yellow-100 text-yellow-600': lesson.status === 'pending',
-                  'bg-blue-100 text-blue-600': lesson.status === 'splitting',
-                  'bg-green-100 text-green-600': lesson.status === 'completed',
-                  'bg-red-100 text-red-600': lesson.status === 'failed'
-                }"
-                class="text-xs px-2 py-1 rounded"
-              >
-                {{ statusText(lesson.status) }}
-              </span>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
+              {{ lesson.grade || '-' }}
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
+              {{ lesson.source || '-' }}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
               {{ new Date(lesson.created_at).toLocaleDateString('zh-CN') }}
@@ -156,16 +150,6 @@ const filteredLessons = computed(() => {
   )
 })
 
-const statusText = (status: string) => {
-  const map: Record<string, string> = {
-    pending: '待处理',
-    splitting: '分割中',
-    completed: '已完成',
-    failed: '失败'
-  }
-  return map[status] || status
-}
-
 const toggleSelect = (id: number) => {
   const index = selectedIds.value.indexOf(id)
   if (index === -1) {
@@ -193,7 +177,7 @@ const handleDelete = async (id: number) => {
       headers: {
         Authorization: authStore.getAuthHeader()
       }
-    })
+    } as any)
     await fetchLessons()
   } catch (error) {
     console.error('Failed to delete:', error)
@@ -213,7 +197,7 @@ const handleBatchDelete = async () => {
         headers: {
           Authorization: authStore.getAuthHeader()
         }
-      })
+      } as any)
     }
     selectedIds.value = []
     selectAll.value = false
