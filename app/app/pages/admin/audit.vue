@@ -1,125 +1,161 @@
 <template>
-  <div class="max-w-6xl mx-auto">
-    <div class="flex items-center gap-4 mb-6">
-      <NuxtLink to="/admin" class="text-gray-500 hover:text-gray-700 dark:text-gray-400">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
-        </svg>
+  <div class="max-w-editorial mx-auto px-6 lg:px-12 py-10">
+    <!-- 顶部版心 -->
+    <section class="mb-8 pb-6 border-b border-ink-500/15 dark:border-paper-300/10">
+      <NuxtLink to="/admin" class="inline-flex items-center gap-2 text-ink-500 dark:text-paper-300 hover:text-cinnabar-600 dark:hover:text-cinnabar-400 transition-colors font-kai text-sm mb-4 group">
+        <span class="font-latin italic group-hover:-translate-x-1 transition-transform">←</span>
+        <span>返 卷宗</span>
       </NuxtLink>
-      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">审计日志</h1>
-      <span class="text-sm text-gray-500 dark:text-gray-400">共 {{ total }} 条</span>
-    </div>
+      <div class="flex items-center gap-3 mb-3">
+        <div class="folio">卷 · 六</div>
+        <div class="brush-divider w-24"></div>
+        <div class="font-latin italic text-xs text-cinnabar-600 dark:text-cinnabar-400 tracking-seal">VI. AUDIT</div>
+      </div>
+      <div class="flex items-end justify-between flex-wrap gap-4">
+        <h1 class="font-display text-5xl md:text-6xl text-ink-700 dark:text-paper-50 leading-none">
+          审<span class="brush-underline text-cinnabar-600 dark:text-cinnabar-400">计</span>
+        </h1>
+        <p class="font-kai text-sm text-ink-500 dark:text-paper-300">
+          共 <span class="font-display text-cinnabar-600 dark:text-cinnabar-400">{{ total }}</span> 条手记
+        </p>
+      </div>
+    </section>
 
-    <!-- 过滤 -->
-    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow p-4 mb-4">
-      <div class="flex flex-col md:flex-row gap-3">
-        <select
-          v-model="actionFilter"
-          class="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          @change="handleSearch"
-        >
-          <option value="">全部操作</option>
-          <option v-for="a in actions" :key="a" :value="a">{{ actionLabel(a) }}</option>
-        </select>
-        <select
-          v-model="targetTypeFilter"
-          class="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          @change="handleSearch"
-        >
-          <option value="">全部对象</option>
-          <option value="users">用户</option>
-          <option value="works">作品</option>
-          <option value="lessons">课文</option>
-        </select>
-        <button
-          @click="handleReset"
-          class="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition"
-        >
-          重置
+    <!-- 筛选 -->
+    <section class="paper-panel p-5 mb-6">
+      <div class="flex flex-col md:flex-row gap-3 items-stretch md:items-end">
+        <div class="flex-1">
+          <label class="block font-latin italic text-[10px] text-ink-400 dark:text-paper-400 tracking-seal mb-1.5">ACTION · 操作</label>
+          <select v-model="actionFilter" class="input-editorial w-full" @change="handleSearch">
+            <option value="">全部操作</option>
+            <option v-for="a in actions" :key="a" :value="a">{{ actionLabel(a) }}</option>
+          </select>
+        </div>
+        <div class="flex-1">
+          <label class="block font-latin italic text-[10px] text-ink-400 dark:text-paper-400 tracking-seal mb-1.5">TARGET · 对象</label>
+          <select v-model="targetTypeFilter" class="input-editorial w-full" @change="handleSearch">
+            <option value="">全部对象</option>
+            <option value="users">用户</option>
+            <option value="works">作品</option>
+            <option value="lessons">课文</option>
+          </select>
+        </div>
+        <button @click="handleReset" class="btn-outline whitespace-nowrap">
+          <span class="font-kai">重置</span>
         </button>
       </div>
+    </section>
+
+    <!-- 加载 -->
+    <div v-if="loading" class="text-center py-24">
+      <div class="inline-flex items-center gap-3 mb-3">
+        <svg class="animate-spin h-6 w-6 text-cinnabar-500" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+        </svg>
+        <span class="font-kai text-sm text-ink-400 dark:text-paper-300">正在翻阅手记...</span>
+      </div>
+      <div class="font-latin italic text-xs text-ink-300 dark:text-paper-400 tracking-widest">LOADING</div>
     </div>
 
-    <!-- Loading -->
-    <div v-if="loading" class="text-center py-12">
-      <svg class="animate-spin h-8 w-8 mx-auto text-indigo-600" viewBox="0 0 24 24">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-      </svg>
-      <p class="text-gray-500 mt-4">加载中...</p>
+    <!-- 空 -->
+    <div v-else-if="logs.length === 0" class="text-center py-24 paper-panel paper-panel-edge">
+      <div class="seal-outline mx-auto mb-4" style="width: 5rem; height: 5rem; padding: 0.5rem; font-size: 1.4rem; line-height: 1.2; writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 0.05em;">
+        无<br>录
+      </div>
+      <p class="font-kai text-sm text-ink-400 dark:text-paper-300">尚无日志</p>
     </div>
 
-    <!-- Empty -->
-    <div v-else-if="logs.length === 0" class="text-center py-12 bg-white dark:bg-gray-800 rounded-2xl">
-      <p class="text-gray-500">暂无日志</p>
-    </div>
+    <!-- 列表 -->
+    <div v-else class="paper-panel paper-panel-edge overflow-hidden">
+      <!-- 表头 -->
+      <div class="hidden md:grid grid-cols-12 gap-4 px-6 py-3 border-b border-ink-500/15 dark:border-paper-300/10 bg-paper-100/40 dark:bg-ink-500/30">
+        <div class="col-span-2 font-latin italic text-[10px] text-ink-400 dark:text-paper-400 tracking-seal">TIME · 时</div>
+        <div class="col-span-3 font-latin italic text-[10px] text-ink-400 dark:text-paper-400 tracking-seal">OPERATOR · 操作员</div>
+        <div class="col-span-2 font-latin italic text-[10px] text-ink-400 dark:text-paper-400 tracking-seal">ACTION · 行</div>
+        <div class="col-span-2 font-latin italic text-[10px] text-ink-400 dark:text-paper-400 tracking-seal">TARGET · 对象</div>
+        <div class="col-span-3 font-latin italic text-[10px] text-ink-400 dark:text-paper-400 tracking-seal">DETAIL · 详</div>
+      </div>
 
-    <!-- 日志列表 -->
-    <div v-else class="bg-white dark:bg-gray-800 rounded-2xl shadow overflow-hidden">
-      <table class="w-full">
-        <thead class="bg-gray-50 dark:bg-gray-900">
-          <tr>
-            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">时间</th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">操作员</th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">操作</th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">对象</th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">详情</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-          <tr v-for="log in logs" :key="log.id" class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+      <!-- 表体 -->
+      <ul class="divide-y divide-ink-500/10 dark:divide-paper-300/10">
+        <li
+          v-for="log in logs"
+          :key="log.id"
+          class="grid grid-cols-1 md:grid-cols-12 gap-3 md:gap-4 px-6 py-4 hover:bg-paper-100/30 dark:hover:bg-ink-500/20 transition-colors"
+        >
+          <!-- 时间 -->
+          <div class="md:col-span-2">
+            <div class="font-latin italic text-xs text-ink-500 dark:text-paper-300 leading-relaxed">
               {{ new Date(log.created_at).toLocaleString('zh-CN') }}
-            </td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm">
-              <div class="text-gray-900 dark:text-white">{{ log.admin?.display_name || log.admin?.email || '系统' }}</div>
-              <div v-if="log.admin_id" class="text-xs text-gray-400 truncate max-w-[160px]">{{ log.admin_id }}</div>
-            </td>
-            <td class="px-6 py-4 whitespace-nowrap">
-              <span
-                :class="actionColorClass(log.action)"
-                class="text-xs px-2 py-1 rounded font-medium"
-              >
-                {{ actionLabel(log.action) }}
-              </span>
-            </td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
-              <div>{{ targetTypeLabel(log.target_type) }}</div>
-              <div v-if="log.target_id" class="text-xs text-gray-400">#{{ log.target_id }}</div>
-            </td>
-            <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
-              <details v-if="log.detail">
-                <summary class="cursor-pointer hover:text-gray-700 dark:hover:text-gray-300">查看详情</summary>
-                <pre class="mt-2 text-xs bg-gray-50 dark:bg-gray-900 p-2 rounded overflow-x-auto max-w-md">{{ formatDetail(log.detail) }}</pre>
-              </details>
-              <span v-else class="text-gray-400">-</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+            </div>
+          </div>
+
+          <!-- 操作员 -->
+          <div class="md:col-span-3">
+            <div class="font-kai text-sm text-ink-700 dark:text-paper-100">{{ log.admin?.display_name || log.admin?.email || '系统' }}</div>
+            <div v-if="log.admin_id" class="font-latin italic text-[10px] text-ink-400 dark:text-paper-400 truncate">{{ log.admin_id }}</div>
+          </div>
+
+          <!-- 操作 -->
+          <div class="md:col-span-2">
+            <span :class="actionSealClass(log.action)" class="text-[10px]">
+              {{ actionGlyph(log.action) }}
+            </span>
+            <div class="font-kai text-xs text-ink-500 dark:text-paper-300 mt-1">{{ actionLabel(log.action) }}</div>
+          </div>
+
+          <!-- 对象 -->
+          <div class="md:col-span-2">
+            <div class="font-kai text-sm text-ink-700 dark:text-paper-100">{{ targetTypeLabel(log.target_type) }}</div>
+            <div v-if="log.target_id" class="font-latin italic text-[10px] text-ink-400 dark:text-paper-400">#{{ log.target_id }}</div>
+          </div>
+
+          <!-- 详情 -->
+          <div class="md:col-span-3">
+            <details v-if="log.detail" class="group">
+              <summary class="cursor-pointer font-kai text-xs text-cinnabar-600 dark:text-cinnabar-400 hover:underline list-none flex items-center gap-1">
+                <span class="font-latin italic transition-transform group-open:rotate-90">›</span>
+                <span>查看详情</span>
+              </summary>
+              <pre class="mt-2 text-xs bg-paper-100 dark:bg-ink-500/40 p-3 overflow-x-auto max-w-md font-latin text-ink-600 dark:text-paper-300 border-l-2 border-cinnabar-500/40">{{ formatDetail(log.detail) }}</pre>
+            </details>
+            <span v-else class="font-latin italic text-xs text-ink-300 dark:text-paper-400">—</span>
+          </div>
+        </li>
+      </ul>
 
       <!-- 分页 -->
-      <div class="px-6 py-4 flex items-center justify-between border-t border-gray-200 dark:border-gray-700">
-        <div class="text-sm text-gray-500 dark:text-gray-400">
-          共 {{ total }} 条，第 {{ page }} / {{ totalPages }} 页
+      <div class="px-6 py-4 flex items-center justify-between border-t border-ink-500/15 dark:border-paper-300/10">
+        <div class="font-kai text-xs text-ink-500 dark:text-paper-300">
+          共 <span class="font-display text-cinnabar-600 dark:text-cinnabar-400">{{ total }}</span> 条 · 第
+          <span class="font-display text-ink-700 dark:text-paper-50">{{ page }}</span> /
+          <span class="font-display text-ink-700 dark:text-paper-50">{{ totalPages }}</span> 页
         </div>
         <div class="flex gap-2">
           <button
             @click="handlePageChange(page - 1)"
             :disabled="page <= 1"
-            class="px-3 py-1 rounded border border-gray-300 dark:border-gray-600 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            class="btn-outline px-3 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            上一页
+            <span class="font-latin italic text-xs">← PREV</span>
           </button>
           <button
             @click="handlePageChange(page + 1)"
             :disabled="page >= totalPages"
-            class="px-3 py-1 rounded border border-gray-300 dark:border-gray-600 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            class="btn-outline px-3 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            下一页
+            <span class="font-latin italic text-xs">NEXT →</span>
           </button>
         </div>
       </div>
+    </div>
+
+    <!-- 落款 -->
+    <div class="mt-16 flex items-center justify-center gap-3">
+      <div class="brush-divider w-32"></div>
+      <div class="seal seal-tag text-xs">审 · 记</div>
+      <div class="brush-divider w-32"></div>
     </div>
   </div>
 </template>
@@ -168,7 +204,6 @@ const fetchLogs = async () => {
     })
     logs.value = response.data || []
     total.value = response.total || 0
-    // 只在首次加载时更新 actions 列表
     if (actions.value.length === 0) {
       actions.value = response.actions || []
     }
@@ -210,21 +245,21 @@ const ACTION_LABELS: Record<string, string> = {
   work_batch_delete: '批量删除作品',
 }
 
-const actionLabel = (action: string): string => {
-  return ACTION_LABELS[action] || action
+const actionLabel = (action: string): string => ACTION_LABELS[action] || action
+
+const actionGlyph = (action: string): string => {
+  if (action === 'work_approve' || action === 'user_unban') return '通'
+  if (action === 'work_reject' || action === 'user_ban') return '禁'
+  if (action.includes('delete')) return '删'
+  if (action.includes('role')) return '改'
+  return '记'
 }
 
-const actionColorClass = (action: string): string => {
-  if (action.startsWith('work_approve') || action === 'user_unban') {
-    return 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-400'
-  }
-  if (action.includes('delete') || action === 'user_ban' || action === 'work_reject') {
-    return 'bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-400'
-  }
-  if (action.includes('role')) {
-    return 'bg-purple-100 text-purple-600 dark:bg-purple-900 dark:text-purple-400'
-  }
-  return 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+const actionSealClass = (action: string): string => {
+  if (action === 'work_approve' || action === 'user_unban') return 'seal seal-tag'
+  if (action.includes('delete') || action === 'user_ban' || action === 'work_reject') return 'seal seal-tag'
+  if (action.includes('role')) return 'seal-outline'
+  return 'seal-outline'
 }
 
 const targetTypeLabel = (t: string): string => {
