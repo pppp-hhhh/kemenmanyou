@@ -2,7 +2,7 @@ export default defineEventHandler(async (event) => {
   const body = await readBody(event)
   const { refresh_token } = body
 
-  const supabaseUrl = 'https://yvhjcqnsvrnjejwgdrlr.supabase.co'
+  const supabaseUrl = 'https://sxxngtcljzwhvajubwno.supabase.co'
   const supabaseKey = useRuntimeConfig().supabaseKey
 
   const response = await $fetch(`${supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {

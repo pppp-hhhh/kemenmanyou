@@ -291,20 +291,19 @@ const toggleSelectAll = () => {
   }
 }
 
-const handleBatchAction = async (action: 'approve' | 'reject' | 'delete') => {
+const handleBatchAction = async (action: 'approve' | 'reject' | 'delete', reason?: string) => {
   if (selectedIds.value.length === 0) return
 
   processing.value = true
   try {
+    const body: any = { ids: selectedIds.value, action }
+    if (action === 'reject' && reason) body.reason = reason
     const result = await $fetch<any>('/api/admin/works/batch', {
       method: 'POST',
       headers: {
         Authorization: authStore.getAuthHeader()
       },
-      body: {
-        ids: selectedIds.value,
-        action
-      }
+      body
     })
 
     if (result.success.length > 0) {
@@ -320,7 +319,10 @@ const handleBatchAction = async (action: 'approve' | 'reject' | 'delete') => {
 }
 
 const handleBatchApprove = () => handleBatchAction('approve')
-const handleBatchReject = () => handleBatchAction('reject')
+const handleBatchReject = () => {
+  const reason = prompt('请输入批量拒绝原因（可选）：') || ''
+  handleBatchAction('reject', reason)
+}
 const handleBatchDelete = () => {
   if (confirm(`确定要删除选中的 ${selectedIds.value.length} 个作品吗？`)) {
     handleBatchAction('delete')
@@ -343,11 +345,13 @@ const handleApprove = async (id: number) => {
 }
 
 const handleReject = async (id: number) => {
+  const reason = prompt('请输入拒绝原因（可选）：') || ''
   processingId.value = id
   try {
     await $fetch(`/api/admin/works/${id}/reject`, {
       method: 'POST',
-      headers: { Authorization: authStore.getAuthHeader() }
+      headers: { Authorization: authStore.getAuthHeader() },
+      body: { reason }
     })
     await fetchWorks()
   } catch (error) {
@@ -365,7 +369,7 @@ const handleDelete = async (id: number) => {
     await $fetch(`/api/admin/works/${id}`, {
       method: 'DELETE',
       headers: { Authorization: authStore.getAuthHeader() }
-    })
+    } as any)
     await fetchWorks()
   } catch (error) {
     console.error('Failed to delete:', error)

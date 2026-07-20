@@ -73,11 +73,11 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
-    async register(email: string, password: string): Promise<{ success: boolean; error?: string }> {
+    async register(email: string, password: string, inviteCode?: string): Promise<{ success: boolean; error?: string }> {
       try {
         const response = await $fetch<AuthSession>('/api/auth/register', {
           method: 'POST',
-          body: { email, password },
+          body: { email, password, invite_code: inviteCode || undefined },
         })
 
         // 注册后自动登录

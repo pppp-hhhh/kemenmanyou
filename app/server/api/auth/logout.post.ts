@@ -1,8 +1,23 @@
 export default defineEventHandler(async (event) => {
+  const supabaseUrl = 'https://sxxngtcljzwhvajubwno.supabase.co'
+  const supabaseKey = useRuntimeConfig().supabaseKey
+
   const authHeader = getHeader(event, 'authorization')
-  await $fetch('http://localhost:8001/api/auth/logout', {
-    method: 'POST',
-    headers: authHeader ? { Authorization: authHeader } : {},
-  })
-  return { status: 'success' }
+  if (!authHeader) {
+    return { success: true }
+  }
+
+  try {
+    await $fetch(`${supabaseUrl}/auth/v1/logout`, {
+      method: 'POST',
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': authHeader,
+      },
+    })
+  } catch (e) {
+    console.error('Logout error:', e)
+  }
+
+  return { success: true }
 })

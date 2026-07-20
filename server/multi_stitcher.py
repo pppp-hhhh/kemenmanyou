@@ -11,8 +11,8 @@ from PIL import Image, ImageDraw, ImageFont
 from supabase import create_client, Client
 
 # --- 初始化 (配置同主程序) ---
-SUPABASE_URL = "https://yvhjcqnsvrnjejwgdrlr.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2aGpjcW5zdnJuamVqd2dkcmxyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5OTQ4MjIsImV4cCI6MjA5MzU3MDgyMn0.7Fb_w64OvFjkhqGde8fPk_w2Qv446RBZXJCues0SdB4"
+SUPABASE_URL = "https://sxxngtcljzwhvajubwno.supabase.co"
+SUPABASE_KEY = "sb_publishable_p8dfH6Su7mQ13TeQfqvCRg_dKdQHWqz"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 DEEPSEEK_API_KEY = "sk-c9ea6887cf524832bcd670fd82ed603e".strip()
@@ -101,31 +101,58 @@ async def monitor_and_stitch(task_id, original_text):
     if len(captured) == 3:
         captured.sort(key=os.path.getctime)
         final_file = combine_images(captured, original_text)
-        supabase.table("lessons").update({"image_url": final_file, "status":"completed"}).eq("id", task_id).execute()
+        # 改用 lesson_tasks 表（与 lessons 解耦）
+        from datetime import datetime
+        supabase.table("lesson_tasks").update({
+            "image_url": final_file,
+            "status": "completed",
+            "completed_at": datetime.now().isoformat()
+        }).eq("id", task_id).execute()
         print("🏆 长漫合成完毕！")
+    else:
+        # 超时未集齐 3 张，标记失败
+        supabase.table("lesson_tasks").update({
+            "status": "failed",
+            "error_message": f"仅捕获 {len(captured)}/3 张分镜",
+            "completed_at": datetime.now().isoformat()
+        }).eq("id", task_id).execute()
+        print(f"❌ 长漫合成失败：仅 {len(captured)}/3 张")
 
 # ================= 接口 =================
 
 @app.post("/api/stitch-story")
 async def stitch_story(req: MultiRequest):
-    # 1. 初始入库
-    res = supabase.table("lessons").insert({"title":req.title, "content":req.content, "status":"splitting"}).execute()
+    from datetime import datetime
+    # 1. 初始入库到 lesson_tasks（不再污染 lessons 课文库）
+    insert_data = {
+        "title": req.title,
+        "content": req.content,
+        "status": "splitting",
+        "started_at": datetime.now().isoformat()
+    }
+    if req.user_id and req.user_id != "boss_001":
+        try:
+            insert_data["user_id"] = req.user_id
+        except Exception:
+            pass  # user_id 不是合法 UUID 时跳过
+
+    res = supabase.table("lesson_tasks").insert(insert_data).execute()
     tid = res.data[0]['id']
-    
+
     # 2. 获取分镜
     scenes = await get_scenes_from_ds(req.title, req.content)
-    
+
     # 3. 循环喂给 ComfyUI
     with open("image_z_image_turbo.json", "r", encoding="utf-8") as f:
         wf = json.load(f)
-    
+
     for s_prompt in scenes:
         wf["57:27"]["inputs"]["text"] = s_prompt
         wf["57:3"]["inputs"]["seed"] = random.randint(1, 999999)
         async with httpx.AsyncClient() as c:
             await c.post(COMFYUI_API_URL, json={"prompt": wf})
         await asyncio.sleep(3) # 缓冲
-        
+
     # 4. 异步拼图
     asyncio.create_task(monitor_and_stitch(tid, req.content))
     return {"msg": "分镜已发送，请等待拼图", "scenes": scenes}

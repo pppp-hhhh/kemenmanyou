@@ -17,7 +17,7 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  const supabaseUrl = 'https://yvhjcqnsvrnjejwgdrlr.supabase.co'
+  const supabaseUrl = 'https://sxxngtcljzwhvajubwno.supabase.co'
   const supabaseKey = useRuntimeConfig().supabaseKey
 
   const response = await $fetch(`${supabaseUrl}/rest/v1/works?id=eq.${id}`, {
@@ -32,7 +32,7 @@ export default defineEventHandler(async (event) => {
 })
 
 async function verifyAdmin(authHeader: string): Promise<boolean> {
-  const supabaseUrl = 'https://yvhjcqnsvrnjejwgdrlr.supabase.co'
+  const supabaseUrl = 'https://sxxngtcljzwhvajubwno.supabase.co'
   const supabaseKey = useRuntimeConfig().supabaseKey
 
   try {
