@@ -1,6 +1,6 @@
-export default defineEventHandler(async () => {
-  const response = await $fetch('http://localhost:8001/api/works', {
-    method: 'GET',
-  })
-  return response
+import { getAllWorks } from '~~/server/utils/local-db'
+
+export default defineEventHandler(async (event) => {
+  const { page = '1', page_size = '20' } = getQuery(event)
+  return getAllWorks(Number(page), Number(page_size))
 })

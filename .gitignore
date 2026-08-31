@@ -35,6 +35,9 @@ Thumbs.db
 # Claude
 .claude/
 
+# MCP config (contains access tokens)
+.mcp.json
+
 # Browser sessions
 .browser-sessions/
 

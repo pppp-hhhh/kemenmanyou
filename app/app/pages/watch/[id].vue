@@ -1,260 +1,306 @@
 <script setup lang="ts">
 import type { Work } from '~/types/api'
+import { ArrowLeft, Download, Images, ChevronLeft, ChevronRight, AlertTriangle } from 'lucide-vue-next'
+import { resolveScenePanels } from '~/utils/comic'
 
+// 观看页为深色播放器主题，声明后 layout footer 切换为深色样式以适配页面主题
+definePageMeta({
+  footerTheme: 'dark'
+})
+
+// 登录策略：/watch 保持公开路由，未登录访问时 server 返回 401，由页内错误分支展示'请先登录'并引导登录。
 const route = useRoute()
-const workId = Number(route.params.id as string)
+
+const rawId = Number(route.params.id as string)
+const workId = Number.isInteger(rawId) && rawId > 0 ? rawId : 0
 
 const { fetchWork } = useWorks()
 
 const work = ref<Work | null>(null)
 const isLoading = ref(true)
-const activeScene = ref(0)
+const loadError = ref<string | null>(null)
+const activePage = ref(0)
+const exporting = ref(false)
+const imgError = ref(false)
 
-// 中文数字
-const toCnNum = (n: number): string => {
-  const cn = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
-  if (n <= 10) return cn[n]
-  if (n < 20) return `十${cn[n - 10]}`
-  return `${cn[Math.floor(n / 10)]}十${cn[n % 10] === '零' ? '' : cn[n % 10]}`
-}
+// 页数 = 场景数（一个场景 = 一页漫画，design §3.1）
+const pageCount = computed(() => work.value?.scenes?.length ?? 0)
 
-// 画风对应的标签
-const styleSealClass: Record<string, string> = {
-  '写实古风': 'seal seal-tag',
-  '水墨风格': 'seal-outline',
-  '彩色插画': 'seal seal-tag',
-}
-const styleSubtitle: Record<string, string> = {
-  '写实古风': '古意',
-  '水墨风格': '墨韵',
-  '彩色插画': '彩绘',
-}
-
-// 格式化时间
-const formatDate = (dateStr: string) => {
-  const date = new Date(dateStr)
-  return date.toLocaleDateString('zh-CN', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
+// 场景 i 的 panel 图映射：优先 scene.panels[].image_url（新作品）；旧作品用 images[i] 单格回退
+const scenePanelImages = (sceneIndex: number): Record<string, string> => {
+  const scene = work.value?.scenes?.[sceneIndex]
+  const map: Record<string, string> = {}
+  if (!scene) return map
+  const panels = resolveScenePanels(scene)
+  panels.forEach((p, i) => {
+    const url = p.image_url || (work.value?.images?.[sceneIndex] ?? '')
+    if (url) map[p.id] = url
   })
+  return map
 }
 
-// 下载单个图片
-const downloadImage = (url: string, index: number) => {
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `${work.value?.title || 'work'}_${index + 1}.png`
-  link.target = '_blank'
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
+const activeScene = computed(() => work.value?.scenes?.[activePage.value])
+
+// 场景导航
+const prevPage = () => {
+  if (activePage.value > 0) {
+    activePage.value--
+    imgError.value = false
+  }
+}
+const nextPage = () => {
+  if (activePage.value < pageCount.value - 1) {
+    activePage.value++
+    imgError.value = false
+  }
 }
 
-// 导出全部图片
+// 键盘导航（带守卫：加载中/无作品/0 页/输入控件聚焦时不拦截方向键）
+const handleKeydown = (e: KeyboardEvent) => {
+  if (isLoading.value || !work.value || !pageCount.value) return
+  const t = e.target as HTMLElement | null
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+  if (e.key === 'ArrowLeft') prevPage()
+  else if (e.key === 'ArrowRight') nextPage()
+}
+
+// 下载当前页的全部 panel 图（跨域来源用 fetch→blob→objectURL 同源化）
+const downloadImage = async (url: string, name: string): Promise<boolean> => {
+  try {
+    const res = await fetch(url)
+    if (!res.ok) throw new Error('HTTP ' + res.status)
+    const blob = await res.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = name
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(objectUrl)
+    return true
+  } catch (err) {
+    console.error('下载失败:', url, err)
+    return false
+  }
+}
+
+const downloadCurrentPage = async () => {
+  const scene = activeScene.value
+  if (!scene) return
+  const panels = resolveScenePanels(scene)
+  const urls = panels.map((p, i) => p.image_url || work.value?.images?.[activePage.value] || '').filter(Boolean)
+  for (let i = 0; i < urls.length; i++) {
+    await downloadImage(urls[i]!, `${work.value?.title || 'work'}_p${activePage.value + 1}_${i + 1}.png`)
+    if (i < urls.length - 1) await new Promise((r) => setTimeout(r, 250))
+  }
+}
+
+// 导出全部：服务端逐页合成漫画长图（composer+lettering），前端代理下载
+const exportMessage = ref<string | null>(null)
 const exportAll = async () => {
-  if (!work.value?.images) return
-
-  for (let i = 0; i < (work.value?.images?.length || 0); i++) {
-    await new Promise(resolve => setTimeout(resolve, 300))
-    const url = work.value?.images?.[i]
-    if (url) downloadImage(url, i)
+  if (!work.value || exporting.value) return
+  exporting.value = true
+  exportMessage.value = null
+  try {
+    const res = await fetch(`/api/works/${workId}/export`)
+    if (!res.ok) throw new Error('HTTP ' + res.status)
+    const blob = await res.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = `课文漫画_${workId}.png`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(objectUrl)
+    exportMessage.value = '漫画长图已导出'
+  } catch (err) {
+    console.error('导出失败:', err)
+    exportMessage.value = '导出失败，请稍后重试'
+  } finally {
+    exporting.value = false
   }
 }
 
 onMounted(async () => {
-  work.value = await fetchWork(workId)
-  isLoading.value = false
+  window.removeEventListener('keydown', handleKeydown)
+  window.addEventListener('keydown', handleKeydown)
+
+  if (!workId) {
+    loadError.value = '作品不存在'
+    isLoading.value = false
+    return
+  }
+  try {
+    work.value = await fetchWork(workId)
+  } catch (e: any) {
+    const status = e?.statusCode || e?.status
+    if (status === 401 || /登录|未登录|unauthor/i.test(e?.message || '')) {
+      loadError.value = '请先登录后查看作品'
+    } else if (status === 404) {
+      loadError.value = '作品不存在'
+    } else {
+      loadError.value = '加载失败，请稍后重试'
+    }
+  } finally {
+    isLoading.value = false
+  }
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleKeydown)
 })
 </script>
 
 <template>
-  <div class="relative min-h-[calc(100vh-4rem)]">
+  <div class="h-[calc(100dvh-8rem)] flex flex-col bg-neutral-900 overflow-hidden">
     <!-- 加载状态 -->
-    <div v-if="isLoading" class="max-w-editorial mx-auto px-6 lg:px-12 py-12">
-      <div class="animate-pulse space-y-8">
-        <div class="flex items-center gap-3">
-          <div class="folio">附 · 观画</div>
-          <div class="brush-divider w-24"></div>
-          <div class="font-latin italic text-xs text-ink-300 dark:text-paper-300 tracking-seal">VIEWING</div>
-        </div>
-        <div class="h-12 bg-ink-500/10 dark:bg-paper-300/10 w-1/2"></div>
-        <div class="grid lg:grid-cols-2 gap-8">
-          <div class="aspect-square bg-ink-500/10 dark:bg-paper-300/10"></div>
-          <div class="space-y-4">
-            <div class="h-4 bg-ink-500/10 dark:bg-paper-300/10 w-full"></div>
-            <div class="h-4 bg-ink-500/10 dark:bg-paper-300/10 w-2/3"></div>
-          </div>
-        </div>
-      </div>
+    <div v-if="isLoading" class="flex-1 flex flex-col items-center justify-center gap-3" role="status" aria-live="polite">
+      <div class="w-8 h-8 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+      <span class="text-neutral-400 text-sm">加载中...</span>
     </div>
 
-    <!-- 作品不存在 -->
-    <div v-else-if="!work" class="flex flex-col items-center justify-center py-32">
-      <div class="inline-block mb-8">
-        <div class="seal" style="width: 5rem; height: 5rem; padding: 0.5rem; font-size: 1.4rem; line-height: 1.2; writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 0.05em;">
-          误<br>录
-        </div>
-      </div>
-      <h3 class="font-display text-3xl text-ink-700 dark:text-paper-50 mb-3">此卷不存在</h3>
-      <p class="font-kai text-base text-ink-500 dark:text-paper-300 mb-8">
-        或已被销毁 · 或本不可览
+    <!-- 加载失败 / 需要登录 / 作品不存在 -->
+    <div v-else-if="!work" class="flex-1 flex flex-col items-center justify-center text-white px-4">
+      <AlertTriangle v-if="loadError === '请先登录后查看作品'" class="w-12 h-12 text-amber-400 mb-4" aria-hidden="true" />
+      <Images v-else class="w-12 h-12 text-neutral-500 mb-4" aria-hidden="true" />
+      <h3 class="text-lg font-semibold mb-2">{{ loadError || '作品不存在' }}</h3>
+      <p v-if="loadError === '请先登录后查看作品'" class="text-neutral-400 mb-6 text-center max-w-sm">
+        登录后即可查看完整作品
       </p>
-      <NuxtLink to="/gallery" class="btn-cinnabar inline-flex items-center gap-3">
-        <span>返回展示广场</span>
-        <span class="font-latin italic">→</span>
+      <p v-else-if="loadError === '作品不存在'" class="text-neutral-400 mb-6 text-center max-w-sm">
+        该作品可能已被删除或无法访问
+      </p>
+      <p v-else class="text-neutral-400 mb-6 text-center max-w-sm">
+        网络或服务器异常，请稍后重试
+      </p>
+      <NuxtLink
+        v-if="loadError === '请先登录后查看作品'"
+        :to="{ path: '/login', query: { redirect: route.fullPath } }"
+        class="inline-flex items-center gap-2 px-5 py-2.5 bg-primary-500 text-white rounded-xl font-medium hover:bg-primary-600 transition-colors focus-visible:ring-2 focus-visible:ring-primary-300"
+      >
+        <ArrowLeft class="w-4 h-4" />
+        去登录
+      </NuxtLink>
+      <NuxtLink
+        v-else
+        to="/gallery"
+        class="inline-flex items-center gap-2 px-5 py-2.5 bg-primary-500 text-white rounded-xl font-medium hover:bg-primary-600 transition-colors focus-visible:ring-2 focus-visible:ring-primary-300"
+      >
+        <ArrowLeft class="w-4 h-4" />
+        返回展示广场
       </NuxtLink>
     </div>
 
-    <!-- 作品内容 -->
-    <div v-else class="max-w-editorial mx-auto px-6 lg:px-12 py-10">
+    <!-- 作品内容：逐页翻漫画 -->
+    <template v-else>
       <!-- 顶部导航 -->
-      <div class="flex items-center justify-between flex-wrap gap-4 mb-8 pb-6 border-b border-ink-500/15 dark:border-paper-300/10">
-        <div class="flex items-center gap-4">
+      <header class="shrink-0 bg-gradient-to-b from-black/80 via-black/40 to-transparent w-full">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex items-center gap-2 sm:gap-3">
           <NuxtLink
             to="/gallery"
-            class="flex items-center gap-2 text-ink-500 dark:text-paper-300 hover:text-cinnabar-500 transition-colors font-kai text-sm group"
+            aria-label="返回展示广场"
+            class="shrink-0 text-white/80 hover:text-white flex items-center gap-1.5 transition-colors focus-visible:ring-2 focus-visible:ring-white/50 rounded-lg px-2 py-1"
           >
-            <span class="font-latin italic group-hover:-translate-x-1 transition-transform">←</span>
-            <span>返 回</span>
+            <ArrowLeft class="w-4 h-4" />
+            <span class="text-sm hidden sm:inline">返回</span>
           </NuxtLink>
-          <div class="h-6 w-px bg-ink-500/20 dark:bg-paper-300/10"></div>
-          <div class="flex items-center gap-3">
-            <div class="folio">附</div>
-            <h1 class="font-display text-3xl md:text-4xl text-ink-700 dark:text-paper-50">
-              {{ work.title }}
-            </h1>
-          </div>
-        </div>
-        <span :class="styleSealClass[work.style] || 'seal-outline'">
-          {{ styleSubtitle[work.style] || work.style }}
-        </span>
-      </div>
-
-      <!-- 主要内容 -->
-      <div class="grid lg:grid-cols-2 gap-10">
-        <!-- 左侧：图片 -->
-        <div class="space-y-4">
-          <!-- 主图 -->
-          <div
-            v-if="work.images && work.images.length > 0"
-            class="aspect-square overflow-hidden bg-paper-200 dark:bg-ink-500 border border-ink-500/15 dark:border-paper-300/10 relative"
-          >
-            <img
-              :src="work.images[activeScene]"
-              :alt="`场景 ${activeScene + 1}`"
-              class="w-full h-full object-contain"
-            >
-            <!-- 幕次号 -->
-            <div class="absolute top-3 left-3 seal seal-tag text-[10px]">
-              {{ toCnNum(activeScene + 1) }}
-            </div>
-            <!-- 漫游印 -->
-            <div class="absolute bottom-3 right-3 seal seal-tag text-[10px]">漫游</div>
-          </div>
-
-          <!-- 缩略图列表 -->
-          <div v-if="work.images && work.images.length > 1" class="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
-            <button
-              v-for="(img, index) in work.images"
-              :key="index"
-              :class="[
-                'flex-shrink-0 w-20 h-20 overflow-hidden border-2 transition-all',
-                activeScene === index
-                  ? 'border-cinnabar-500 shadow-seal'
-                  : 'border-ink-500/15 dark:border-paper-300/10 opacity-60 hover:opacity-100'
-              ]"
-              @click="activeScene = index"
-            >
-              <img :src="img" :alt="`场景 ${index + 1}`" class="w-full h-full object-cover">
-            </button>
-          </div>
-
-          <!-- 下载按钮 -->
-          <div class="flex gap-3">
-            <button
-              v-if="work.images && work.images.length === 1"
-              class="btn-ink flex-1 inline-flex items-center justify-center gap-3"
-              @click="work.images?.[0] && downloadImage(work.images[0], 0)"
-            >
-              <span>下载此画</span>
-              <span class="font-latin italic text-xs">DOWNLOAD</span>
-            </button>
-            <button
-              v-else-if="work.images && work.images.length > 1"
-              class="btn-ink flex-1 inline-flex items-center justify-center gap-3"
-              @click="exportAll"
-            >
-              <span>导出全部 ({{ work.images.length }})</span>
-              <span class="font-latin italic text-xs">EXPORT ALL</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- 右侧：场景描述 -->
-        <div class="paper-panel paper-panel-edge p-7">
-          <div class="flex items-center gap-3 mb-6 pb-4 border-b border-ink-500/10 dark:border-paper-300/10">
-            <span class="font-display text-2xl text-cinnabar-600 dark:text-cinnabar-400">目</span>
-            <h2 class="font-display text-lg text-ink-700 dark:text-paper-50">场景目录</h2>
-            <div class="brush-divider flex-1"></div>
-            <span class="font-latin italic text-xs text-ink-300 dark:text-paper-300 tracking-seal">
-              {{ work.scenes?.length || 0 }} SCENES
+          <div class="flex items-center gap-2 min-w-0 flex-1">
+            <h1 class="text-white font-semibold text-sm sm:text-base truncate">{{ work.title }}</h1>
+            <span class="flex-none hidden sm:inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-white/20 text-white backdrop-blur-sm">
+              {{ work.style }}
+            </span>
+            <span v-if="pageCount > 1" class="flex-none text-xs text-white/60 tabular-nums">
+              第 {{ activePage + 1 }} 页 / 共 {{ pageCount }} 页
             </span>
           </div>
-
-          <div class="space-y-3 max-h-[60vh] overflow-y-auto pr-2 scrollbar-none">
-            <div
-              v-for="(scene, index) in work.scenes"
-              :key="index"
-              :class="[
-                'p-4 cursor-pointer transition-all border',
-                activeScene === index
-                  ? 'bg-cinnabar-50 dark:bg-cinnabar-900/15 border-cinnabar-500'
-                  : 'bg-transparent border-ink-500/10 dark:border-paper-300/10 hover:bg-paper-100/50 dark:hover:bg-ink-500/30'
-              ]"
-              @click="activeScene = index"
+          <div class="flex items-center gap-2 shrink-0">
+            <button
+              :disabled="exporting"
+              :aria-busy="exporting"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-white/80 hover:text-white border border-white/30 rounded-xl hover:bg-white/10 transition-colors focus-visible:ring-2 focus-visible:ring-white/50 disabled:opacity-50 disabled:cursor-not-allowed"
+              @click="exportAll"
             >
-              <div class="flex items-start gap-3">
-                <span :class="[
-                  'flex-shrink-0 w-9 h-9 flex items-center justify-center font-display text-sm',
-                  activeScene === index
-                    ? 'seal seal-tag'
-                    : 'seal-outline'
-                ]">
-                  {{ toCnNum(index + 1) }}
-                </span>
-                <div class="flex-1 min-w-0">
-                  <p class="font-kai text-ink-700 dark:text-paper-100 font-medium mb-1 leading-relaxed">
-                    {{ scene.description_cn }}
-                  </p>
-                  <p class="font-latin italic text-xs text-ink-300 dark:text-paper-400 truncate">
-                    {{ scene.prompt_en }}
-                  </p>
-                </div>
-              </div>
-            </div>
+              <Download class="w-3.5 h-3.5" />
+              {{ exporting ? '导出中...' : '导出漫画长图' }}
+            </button>
+            <button
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-white/80 hover:text-white border border-white/30 rounded-xl hover:bg-white/10 transition-colors focus-visible:ring-2 focus-visible:ring-white/50"
+              @click="downloadCurrentPage"
+            >
+              <Download class="w-3.5 h-3.5" />
+              下载本页
+            </button>
           </div>
+        </div>
+      </header>
 
-          <!-- 元信息 -->
-          <div class="mt-6 pt-4 border-t border-ink-500/10 dark:border-paper-300/10">
-            <div class="flex items-center justify-between">
-              <span class="font-kai text-xs text-ink-400 dark:text-paper-300">
-                共 {{ work.scenes?.length || 0 }} 幕
-              </span>
-              <span class="font-latin italic text-xs text-ink-400 dark:text-paper-300">
-                {{ formatDate(work.created_at) }}
-              </span>
-            </div>
+      <!-- 漫画页区域 -->
+      <div class="flex-1 min-h-0 relative overflow-hidden">
+        <div v-if="!imgError && activeScene" class="min-h-0 h-full flex items-center justify-center py-6 px-4">
+          <div class="max-w-3xl w-full h-full flex items-center justify-center">
+            <WorkspaceComicPage
+              :scene="activeScene"
+              :panel-images="scenePanelImages(activePage)"
+              :show-order-badge="true"
+            />
+            <p class="text-white/60 text-xs text-center mt-3">
+              {{ resolveScenePanels(activeScene).length }} 格 · 点击格子可放大阅读（左/右方向键翻页）
+            </p>
           </div>
+        </div>
+        <div v-else-if="imgError" class="min-h-full flex flex-col items-center justify-center text-white/70 gap-2">
+          <Images class="w-10 h-10 text-neutral-500" aria-hidden="true" />
+          <span class="text-sm">页面加载失败</span>
         </div>
       </div>
 
-      <!-- 落款 -->
-      <div class="mt-16 flex items-center justify-center gap-4">
-        <div class="brush-divider w-32"></div>
-        <div class="seal seal-tag text-xs">{{ work.style }}</div>
-        <div class="brush-divider w-32"></div>
+      <!-- 底部控制栏 -->
+      <div class="shrink-0 w-full bg-gradient-to-t from-black/85 via-black/50 to-transparent pt-5 pb-5 px-4">
+        <div class="max-w-3xl mx-auto text-center">
+          <p v-if="exportMessage" role="status" class="text-xs text-white/70 mb-2">{{ exportMessage }}</p>
+          <p
+            v-if="activeScene"
+            class="text-white/90 text-sm mb-4 line-clamp-2 px-6 py-2 bg-black/40 backdrop-blur-md rounded-xl max-w-lg mx-auto border border-white/10 shadow-lg"
+            aria-live="polite"
+          >
+            第 {{ activePage + 1 }} 页 · {{ activeScene.description_cn }}
+          </p>
+
+          <div class="flex items-center justify-center gap-3">
+            <button
+              :disabled="activePage === 0"
+              aria-label="上一页"
+              class="text-white/60 hover:text-white px-4 py-2 rounded-xl hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors focus-visible:ring-2 focus-visible:ring-white/50"
+              @click="prevPage"
+            >
+              <ChevronLeft class="w-5 h-5" />
+            </button>
+
+            <div class="flex gap-1.5" role="group" aria-label="页码选择">
+              <button
+                v-for="(_, i) in pageCount"
+                :key="i"
+                :aria-label="'第 ' + (i + 1) + ' 页'"
+                :aria-current="i === activePage ? 'true' : undefined"
+                class="h-2 rounded-full transition-all duration-300 focus-visible:ring-2 focus-visible:ring-white/50"
+                :class="i === activePage ? 'bg-white w-6' : 'bg-white/30 hover:bg-white/50 w-2'"
+                @click="activePage = i; imgError = false"
+              />
+            </div>
+
+            <button
+              :disabled="activePage >= pageCount - 1"
+              aria-label="下一页"
+              class="text-white/60 hover:text-white px-4 py-2 rounded-xl hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors focus-visible:ring-2 focus-visible:ring-white/50"
+              @click="nextPage"
+            >
+              <ChevronRight class="w-5 h-5" />
+            </button>
+          </div>
+        </div>
       </div>
-    </div>
+    </template>
   </div>
 </template>

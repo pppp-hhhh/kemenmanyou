@@ -3,10 +3,10 @@ export default defineNuxtRouteMiddleware((to, from) => {
   const authStore = useAuthStore()
 
   // 公开路由（不需要登录）
-  const publicRoutes = ['/login', '/register', '/gallery', '/', '/workspace']
+  const publicRoutes = ['/login', '/register', '/gallery', '/']
 
   // 检查是否是公开路由
-  if (publicRoutes.some(route => to.path === route || to.path.startsWith('/watch'))) {
+  if (publicRoutes.some(route => to.path === route) || to.path.startsWith('/watch')) {
     return
   }
 

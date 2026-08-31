@@ -1,12 +1,32 @@
 <script setup lang="ts">
-import { STYLE_OPTIONS, type StyleType } from '~/types/api'
+import { STYLE_OPTIONS, type StyleType, type TaskStatus, type Lesson } from '~/types/api'
 import { useWorkspaceStore } from '~/stores/workspace'
+import { useAuthStore } from '~/stores/auth'
+import { restoreDraft, clearDraft, isFreshDraft, formatSavedAgo } from '~/utils/workspace-draft'
+import { flattenPanelsForGenerate, resolveScenePanels } from '~/utils/comic'
 
 const store = useWorkspaceStore()
+const auth = useAuthStore()
+
+// textarea auto-resize
+const autoResize = (e: Event) => {
+  const el = e.target as HTMLTextAreaElement
+  el.style.height = "auto"
+  el.style.height = Math.min(el.scrollHeight, 200) + "px"
+}
 const { startPoll } = useTaskPoll()
 
+// 暗色模式
+const { isDark, toggle } = useDarkMode()
+
+// 保存成功状态
+const saveSuccessWorkId = ref<number | null>(null)
+const saveSuccessMsg = ref('')
+
+// 作品标题
+const saveTitle = ref('')
+
 // 课文列表（从数据库获取）
-interface Lesson { id: number; title: string; content: string }
 const { data: lessons, refresh: refreshLessons } = await useFetch<Lesson[]>('/api/lessons', {
   default: () => [] as Lesson[],
 })
@@ -22,11 +42,34 @@ const selectedStyle = ref<StyleType>('写实古风')
 // 自定义课文内容
 const customText = ref('')
 
-// 画风对应的中文释义
-const styleMeta: Record<StyleType, { cn: string; latin: string; subtitle: string }> = {
-  '写实古风': { cn: '古意', latin: 'Ancient Realism', subtitle: '写实笔触，古风意境' },
-  '水墨风格': { cn: '墨韵', latin: 'Ink Wash', subtitle: '水墨晕染，虚实相生' },
-  '彩色插画': { cn: '彩绘', latin: 'Color Illustration', subtitle: '色润明丽，画意盎然' },
+// 步骤管理
+const currentStep = ref(0) // 0: 选择课文, 1: AI分析, 2: 编辑场景, 3: 生成图片
+const steps = [
+  { title: '选择课文', icon: 'book' },
+  { title: 'AI 分析', icon: 'search' },
+  { title: '编辑场景', icon: 'edit' },
+  { title: '生成图片', icon: 'image' },
+]
+
+// 步骤导航
+const goToStep = (step: number) => {
+  // 只允许导航到已完成的步骤或当前步骤的下一步
+  if (step <= currentStep.value || 
+      (step === currentStep.value + 1 && store.scenes.length > 0)) {
+    currentStep.value = step
+  }
+}
+
+const nextStep = () => {
+  if (currentStep.value < steps.length - 1) {
+    currentStep.value++
+  }
+}
+
+const prevStep = () => {
+  if (currentStep.value > 0) {
+    currentStep.value--
+  }
 }
 
 // 分析课文
@@ -41,59 +84,68 @@ const analyzeText = async () => {
   }
 
   store.setAnalyzing(true)
-  store.setProgressMsg('AI 正在析文拆景...')
+  store.setProgressMsg('AI 正在分析课文...')
+  currentStep.value = 1 // 切换到分析步骤
 
   try {
-    const result = await $fetch<{ scenes: { description_cn: string; prompt_en: string }[] }>('/api/analyze', {
+    const result = await $fetch<{ scenes: { description_cn: string; prompt_en: string }[]; characters?: any[] }>('/api/analyze', {
       method: 'POST',
       body: {
         text,
         style: selectedStyle.value,
       },
     })
+    // 记录课文来源，供草稿恢复后继续使用
+    store.setText(textSource.value === 'select' ? selectedLessonId.value : null, text)
     store.setScenes(result.scenes)
-    store.setProgressMsg(`析文毕 · 共得 ${result.scenes.length} 幕`)
+    // 角色注册表（CharacterLock 依据；analyzer 未返回时为空，不影响旧链）
+    store.setCharacters(result.characters || [])
+    const panelCount = store.totalPanels
+    store.setProgressMsg(`分析完成！生成了 ${result.scenes.length} 个场景 / ${panelCount} 格`)
+    store.saveDraft()
+    currentStep.value = 2 // 分析完成，切换到编辑场景步骤
   }
   catch (error) {
     console.error('分析失败:', error)
-    store.setProgressMsg('析文未成，请再试')
+    store.setProgressMsg('分析失败，请重试')
+    currentStep.value = 0 // 分析失败，返回选择课文步骤
   }
   finally {
     store.setAnalyzing(false)
   }
 }
 
-// 画风对应的提示词前缀
-const stylePromptMap: Record<StyleType, string> = {
-  '写实古风': 'realistic ancient Chinese style, traditional Chinese painting aesthetic, detailed, historical accuracy,',
-  '水墨风格': 'Chinese ink painting style, wash painting, sumi-e, black and white, traditional brush strokes,',
-  '彩色插画': 'colorful illustration, vibrant, modern cartoon style, anime, bright colors,'
-}
-
-// 开始生成
+// 开始生成（真漫画版）：场景展开为 panel 级入参，附角色注册表；风格前缀由服务端统一注入
 const generateImages = async () => {
   if (store.scenes.length === 0) {
     alert('请先生成场景')
     return
   }
 
-  try {
-    const promptsWithStyle = store.scenes.map(scene =>
-      `${stylePromptMap[selectedStyle.value]} ${scene.prompt_en}`
-    )
+  const panels = flattenPanelsForGenerate(store.scenes)
+  if (panels.length === 0) {
+    alert('没有可生成的格')
+    return
+  }
 
+  try {
     const result = await $fetch<{ task_id: string }>('/api/generate', {
       method: 'POST',
       body: {
-        prompts: promptsWithStyle,
+        panels,
+        characters: store.characters || [],
+        character_mode: 'prompt',
         style: selectedStyle.value,
       },
     })
+    store.setStyle(selectedStyle.value)
     startPoll(result.task_id)
+    store.saveDraft()
+    currentStep.value = 3 // 切换到生成图片步骤
   }
   catch (error) {
     console.error('提交生成任务失败:', error)
-    store.setProgressMsg('提交未成')
+    store.setProgressMsg('提交生成任务失败')
   }
 }
 
@@ -108,19 +160,20 @@ const saveWork = async () => {
     const result = await $fetch<{ work_id: number; message: string }>('/api/works', {
       method: 'POST',
       body: {
-        custom_title: `课文漫画 - ${new Date().toLocaleDateString()}`,
+        custom_title: saveTitle.value.trim() || `课文漫画 - ${new Date().toLocaleDateString()}`,
         scenes: store.scenes,
         images: store.taskStatus.images.map((i: any) => i.url),
         style: selectedStyle.value,
         is_public: false,
       },
     })
-    store.setProgressMsg(`已入藏 · 编号 ${result.work_id}`)
-    alert(`作品已入藏！编号：${result.work_id}`)
+    store.setProgressMsg(`作品已保存！ID: ${result.work_id}`)
+    saveSuccessWorkId.value = result.work_id
+    saveSuccessMsg.value = `作品「${saveTitle.value.trim() || '课文漫画'}」已成功保存`
   }
   catch (error) {
     console.error('保存失败:', error)
-    store.setProgressMsg('入藏未成，请再试')
+    store.setProgressMsg('保存失败，请重试')
   }
 }
 
@@ -131,9 +184,10 @@ const exportWork = async () => {
     return
   }
 
-  store.setProgressMsg('正在装裱长卷...')
+  store.setProgressMsg('正在生成导出文件...')
 
   try {
+    // 先保存作品获取 work_id
     const result = await $fetch<{ work_id: number; message: string }>('/api/works', {
       method: 'POST',
       body: {
@@ -145,414 +199,380 @@ const exportWork = async () => {
       },
     })
 
+    // 通过前端代理下载
     const response = await fetch(`/api/works/${result.work_id}/export`)
     const blob = await response.blob()
 
+    // 创建下载链接
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `课文画册_${result.work_id}.png`
+    link.download = `课文漫画_${result.work_id}.png`
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
     URL.revokeObjectURL(url)
 
-    store.setProgressMsg('装裱毕！')
+    store.setProgressMsg('导出成功！')
+    saveSuccessWorkId.value = result.work_id
+    saveSuccessMsg.value = '长图导出成功，作品已保存'
   }
   catch (error) {
     console.error('导出失败:', error)
-    store.setProgressMsg('装裱未成，请再试')
+    store.setProgressMsg('导出失败，请重试')
   }
 }
+
+// ---- 恢复未完成的生成会话（localStorage 草稿；仅本人、7 天内有效） ----
+
+/** 判断任务探测错误是否为 404（任务已不存在） */
+const isTaskNotFoundError = (error: unknown) => {
+  const e = error as { status?: number, statusCode?: number, response?: { status?: number } } | null
+  return e?.status === 404 || e?.statusCode === 404 || e?.response?.status === 404
+}
+
+/** 把恢复后的 store 状态同步回页面本地表单控件 */
+const syncFormFromStore = () => {
+  selectedLessonId.value = store.selectedTextId
+  customText.value = store.customText
+  selectedStyle.value = store.selectedStyle
+  textSource.value = store.selectedTextId != null
+    ? 'select'
+    : (store.customText.trim() ? 'custom' : 'select')
+  
+  // 根据恢复的状态设置步骤
+  if (store.scenes.length > 0) {
+    if (store.taskStatus?.status === 'completed') {
+      currentStep.value = 3 // 已完成生成
+    } else if (store.taskId) {
+      currentStep.value = 3 // 正在生成
+    } else {
+      currentStep.value = 2 // 有场景但未开始生成
+    }
+  } else if (store.customText.trim() || store.selectedTextId) {
+    currentStep.value = 0 // 有课文但未分析
+  }
+}
+
+// ---- Lightbox（场景级：放大查看整页漫画） ----
+const lightboxOpen = ref(false)
+const lightboxSceneIndex = ref(0)
+const lightboxScale = ref(1)
+
+/** 场景 i 的逐格图片映射（panel_id 优先，旧任务 index 回退） */
+const scenePanelImages = (sceneIndex: number) => {
+  const scene = store.scenes[sceneIndex]
+  if (!scene) return {}
+  const map: Record<string, string> = {}
+  const byId = new Map<string, string>()
+  const byIndex = new Map<number, string>()
+  for (const img of store.taskStatus?.images || []) {
+    if (img?.url) {
+      if (img.panel_id) byId.set(img.panel_id, img.url)
+      else byIndex.set(img.index, img.url)
+    }
+  }
+  resolveScenePanels(scene).forEach((p, i) => {
+    const url = byId.get(p.id) || byIndex.get(i) || p.image_url || ''
+    if (url) map[p.id] = url
+  })
+  return map
+}
+
+const openLightbox = (sceneIndex: number) => {
+  lightboxSceneIndex.value = sceneIndex
+  lightboxScale.value = 1
+  lightboxOpen.value = true
+}
+const closeLightbox = () => { lightboxOpen.value = false; lightboxScale.value = 1 }
+const prevScene = () => {
+  if (lightboxSceneIndex.value > 0) lightboxSceneIndex.value--
+}
+const nextScene = () => {
+  if (lightboxSceneIndex.value < store.scenes.length - 1) lightboxSceneIndex.value++
+}
+const zoomIn = () => { lightboxScale.value = Math.min(lightboxScale.value + 0.25, 3) }
+const zoomOut = () => { lightboxScale.value = Math.max(lightboxScale.value - 0.25, 0.5) }
+
+onMounted(async () => {
+  store.initDraftPersistence()
+
+  const draft = restoreDraft()
+  if (!draft)
+    return
+
+  // 仅草稿属主本人（且已登录）可见
+  const uid = auth.user?.id ?? null
+  if (!uid || draft.ownerUserId !== uid)
+    return
+
+  // 本人过期草稿：直接清理，不打扰
+  if (!isFreshDraft(draft)) {
+    clearDraft()
+    return
+  }
+
+  const sceneCount = draft.scenes.length
+  const resume = confirm(`检测到未完成的生成会话（${sceneCount} 个场景，保存于 ${formatSavedAgo(draft.savedAt)}）：
+
+「确定」继续上次会话，「取消」放弃并清空。`)
+  if (!resume) {
+    store.clear()
+    syncFormFromStore()
+    return
+  }
+
+  store.applyDraft(draft)
+  syncFormFromStore()
+
+  // 探测原生成任务：仍存在则续轮询；404 则标记中断并引导重新生成
+  const taskId = store.taskId
+  if (!taskId)
+    return
+
+  try {
+    const status = await $fetch<TaskStatus>(`/api/task/${taskId}`)
+    store.setTaskStatus(status)
+    startPoll(taskId)
+  }
+  catch (error) {
+    if (isTaskNotFoundError(error)) {
+      store.setTaskId(null)
+      store.setTaskStatus(null)
+      store.setProgressMsg('原生成任务已失效（服务端不存在），请点击「开始生成」重新生成')
+      store.saveDraft()
+    }
+    else {
+      console.error('恢复生成任务失败:', error)
+      store.setProgressMsg('获取原生成任务状态失败，请稍后重试')
+    }
+  }
+})
 </script>
 
 <template>
-  <div class="relative min-h-[calc(100vh-4rem)]">
-    <!-- 顶部编辑式版心 -->
-    <section class="relative border-b border-ink-500/15 dark:border-paper-300/10 overflow-hidden">
-      <div class="absolute inset-0 pointer-events-none">
-        <div class="ink-wash"
-             style="top: -20%; left: -10%; width: 50%; height: 100%;
-                    background: radial-gradient(ellipse at center, rgba(139, 111, 71, 0.12), transparent 70%);"></div>
-      </div>
+  <div class="min-h-screen bg-surface-50 dark:bg-surface-900">
+    <!-- 步骤进度条 -->
+    <WorkspaceStepProgressBar
+      :current-step="currentStep"
+      :steps="steps"
+    />
 
-      <div class="relative max-w-editorial mx-auto px-6 lg:px-12 py-12">
-        <div class="flex items-center gap-3 mb-3">
-          <div class="folio">卷 · 二</div>
-          <div class="brush-divider w-24"></div>
-          <div class="font-latin italic text-xs text-cinnabar-600 dark:text-cinnabar-400 tracking-seal">II. ATELIER</div>
-        </div>
+    <!-- 主内容区 -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div class="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6 min-h-[calc(100vh-180px)]">
+        <!-- 左侧操作区 (65%) -->
+        <div class="space-y-4 overflow-y-auto scrollbar-none">
+          <!-- 步骤 0: 选择课文 -->
+          <WorkspaceStepLessonSource
+            v-if="currentStep === 0"
+            :lessons="lessons"
+            :selected-lesson-id="selectedLessonId"
+            :selected-style="selectedStyle"
+            :text-source="textSource"
+            :custom-text="customText"
+            :select-open="selectOpen"
+            @update:selected-lesson-id="(val) => selectedLessonId = val"
+            @update:selected-style="(val) => selectedStyle = val"
+            @update:text-source="(val) => textSource = val"
+            @update:custom-text="(val) => customText = val"
+            @update:select-open="(val) => selectOpen = val"
+            @next="analyzeText"
+          />
 
-        <div class="flex items-end justify-between flex-wrap gap-4">
-          <h1 class="font-display text-5xl md:text-6xl text-ink-700 dark:text-paper-50 leading-none">
-            工作<span class="brush-underline text-cinnabar-600 dark:text-cinnabar-400">台</span>
-          </h1>
-          <p class="font-kai text-sm text-ink-500 dark:text-paper-300 max-w-md leading-relaxed">
-            择文 · 析景 · 绘画 · 装裱 — 于此处完成一卷画册的全部工序
-          </p>
-        </div>
-      </div>
-    </section>
+          <!-- 步骤 1: AI 分析中 -->
+          <WorkspaceStepAnalyzing
+            v-else-if="currentStep === 1"
+            :progress-msg="store.progressMsg"
+            :is-analyzing="store.isAnalyzing"
+            @cancel="currentStep = 0"
+          />
 
-    <!-- 主内容 -->
-    <main class="max-w-editorial mx-auto px-6 lg:px-12 py-10">
-      <div class="grid lg:grid-cols-2 gap-8">
-        <!-- ============ 左侧：操作区 ============ -->
-        <div class="space-y-6">
-          <!-- 课文来源 -->
-          <section class="paper-panel paper-panel-edge p-7">
-            <div class="flex items-center gap-3 mb-5">
-              <span class="font-display text-2xl text-cinnabar-600 dark:text-cinnabar-400">壹</span>
-              <h2 class="font-display text-lg text-ink-700 dark:text-paper-50">择 文</h2>
-              <div class="brush-divider flex-1"></div>
-              <span class="font-latin italic text-xs text-ink-300 dark:text-paper-300 tracking-seal">I. SOURCE</span>
-            </div>
+          <!-- 步骤 2: 编辑场景 -->
+          <WorkspaceStepEditScenes
+            v-else-if="currentStep === 2"
+            :scenes="store.scenes"
+            @update-scene="(index, scene) => store.updateScene(index, scene)"
+            @update-panel="(si, pi, patch) => store.updatePanel(si, pi, patch)"
+            @add-panel="(si) => store.addPanel(si)"
+            @remove-panel="(si, pi) => store.removePanel(si, pi)"
+            @move-scene-up="(index) => store.moveSceneUp(index)"
+            @move-scene-down="(index) => store.moveSceneDown(index)"
+            @remove-scene="(index) => store.removeScene(index)"
+            @back="currentStep = 0"
+            @next="generateImages"
+          />
 
-            <!-- 切换 -->
-            <div class="grid grid-cols-2 gap-px bg-ink-500/15 dark:bg-paper-300/10 mb-5">
-              <button
-                v-for="opt in [{ k: 'select', label: '课文库' }, { k: 'custom', label: '自输入' }]"
-                :key="opt.k"
-                :class="[
-                  'py-2.5 px-4 font-kai text-sm transition-all duration-200',
-                  textSource === opt.k
-                    ? 'bg-paper-50 dark:bg-ink-500 text-cinnabar-600 dark:text-cinnabar-400'
-                    : 'bg-transparent text-ink-400 dark:text-paper-300 hover:text-cinnabar-500'
-                ]"
-                @click="textSource = opt.k as 'select' | 'custom'"
+          <!-- 步骤 3: 生成图片 -->
+          <WorkspaceStepGenerating
+            v-else-if="currentStep === 3"
+            :scenes="store.scenes"
+            :characters="store.characters"
+            :task-status="store.taskStatus"
+            :is-generating-complete="store.isGeneratingComplete"
+            :progress-percent="store.progressPercent"
+            :progress-msg="store.progressMsg"
+            @cancel="currentStep = 2"
+            @back="currentStep = 2"
+          />
+
+          <!-- 保存成功提示 -->
+          <div v-if="saveSuccessWorkId" class="bg-success-50 dark:bg-success-900/20 border border-success-200 dark:border-success-800 rounded-lg p-4">
+            <p class="text-success-700 dark:text-success-300 font-medium mb-3">{{ saveSuccessMsg }}</p>
+            <div class="flex gap-3">
+              <NuxtLink
+                to="/my-works"
+                class="flex-1 px-4 py-2 bg-success-500 hover:bg-success-600 text-white text-sm font-medium rounded-md text-center transition-colors"
               >
-                {{ opt.label }}
+                查看我的作品
+              </NuxtLink>
+              <button
+                class="flex-1 px-4 py-2 bg-white dark:bg-surface-800 text-surface-700 dark:text-surface-200 text-sm font-medium rounded-md hover:bg-surface-100 dark:hover:bg-surface-700 transition-colors"
+                @click="saveSuccessWorkId = null; saveSuccessMsg = ''"
+              >
+                继续创作
               </button>
             </div>
-
-            <!-- 选择课文 -->
-            <div v-if="textSource === 'select'" class="relative">
-              <button
-                type="button"
-                class="w-full px-4 py-3 bg-transparent border border-ink-500/20 dark:border-paper-300/15 text-left
-                       flex items-center justify-between gap-2 hover:border-cinnabar-500 transition-colors
-                       font-kai text-ink-700 dark:text-paper-100"
-                @click="selectOpen = !selectOpen"
-                @blur="selectOpen = false"
-              >
-                <span :class="selectedLessonId ? '' : 'text-ink-300 dark:text-paper-300 italic'">
-                  {{ selectedLessonId ? (lessons?.find(l => l.id === selectedLessonId)?.title || '请选择') : '请选择一篇课文...' }}
-                </span>
-                <svg class="w-4 h-4 text-cinnabar-500 flex-shrink-0 transition-transform duration-200"
-                     :class="{ 'rotate-180': selectOpen }"
-                     fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-
-              <Transition
-                enter-active-class="transition ease-out duration-100"
-                enter-from-class="transform opacity-0 scale-95"
-                enter-to-class="transform opacity-100 scale-100"
-                leave-active-class="transition ease-in duration-75"
-                leave-from-class="transform opacity-100 scale-100"
-                leave-to-class="transform opacity-0 scale-95"
-              >
-                <div
-                  v-if="selectOpen"
-                  class="absolute z-50 w-full mt-2 bg-paper-50 dark:bg-ink-600 border border-ink-500/20 dark:border-paper-300/15 shadow-paper-lg overflow-hidden"
-                >
-                  <div class="max-h-72 overflow-y-auto">
-                    <button
-                      v-for="lesson in lessons"
-                      :key="lesson.id"
-                      type="button"
-                      class="w-full px-4 py-3 text-left font-kai text-ink-700 dark:text-paper-100 hover:bg-cinnabar-50 dark:hover:bg-cinnabar-900/20 hover:text-cinnabar-700 dark:hover:text-cinnabar-300 transition-colors"
-                      :class="{ 'bg-cinnabar-50 dark:bg-cinnabar-900/20 text-cinnabar-700 dark:text-cinnabar-300': selectedLessonId === lesson.id }"
-                      @mousedown.prevent="selectedLessonId = lesson.id; selectOpen = false"
-                    >
-                      <span class="font-medium">{{ lesson.title }}</span>
-                    </button>
-                  </div>
-                </div>
-              </Transition>
-            </div>
-
-            <!-- 自定义输入 -->
-            <div v-else>
-              <textarea
-                v-model="customText"
-                rows="6"
-                placeholder="请输入课文内容..."
-                class="w-full px-4 py-3 bg-transparent border border-ink-500/20 dark:border-paper-300/15
-                       focus:border-cinnabar-500 font-kai text-ink-700 dark:text-paper-100
-                       dark:placeholder-paper-300/50 transition-colors resize-none"
-              />
-            </div>
-          </section>
-
-          <!-- 画风选择 -->
-          <section class="paper-panel paper-panel-edge p-7">
-            <div class="flex items-center gap-3 mb-5">
-              <span class="font-display text-2xl text-cinnabar-600 dark:text-cinnabar-400">贰</span>
-              <h2 class="font-display text-lg text-ink-700 dark:text-paper-50">择 风</h2>
-              <div class="brush-divider flex-1"></div>
-              <span class="font-latin italic text-xs text-ink-300 dark:text-paper-300 tracking-seal">II. STYLE</span>
-            </div>
-
-            <div class="grid grid-cols-3 gap-3">
-              <button
-                v-for="style in STYLE_OPTIONS"
-                :key="style"
-                :class="[
-                  'p-4 border transition-all duration-300 text-center group relative overflow-hidden',
-                  selectedStyle === style
-                    ? 'border-cinnabar-500 bg-cinnabar-500 text-paper-50 shadow-seal'
-                    : 'border-ink-500/20 dark:border-paper-300/15 hover:border-cinnabar-500/60 bg-transparent'
-                ]"
-                @click="selectedStyle = style"
-              >
-                <!-- 选中时的背景大字 -->
-                <div
-                  v-if="selectedStyle === style"
-                  class="absolute inset-0 flex items-center justify-center pointer-events-none"
-                >
-                  <span class="font-display text-7xl text-paper-50/15 select-none">{{ styleMeta[style].cn }}</span>
-                </div>
-
-                <div class="relative">
-                  <div class="font-display text-2xl mb-1">{{ styleMeta[style].cn }}</div>
-                  <div class="font-latin italic text-[10px] tracking-seal opacity-80">{{ styleMeta[style].latin }}</div>
-                  <div class="font-kai text-[11px] mt-2 opacity-70 leading-tight">{{ styleMeta[style].subtitle }}</div>
-                </div>
-              </button>
-            </div>
-          </section>
-
-          <!-- AI 析文 -->
-          <section class="paper-panel paper-panel-edge p-7">
-            <div class="flex items-center gap-3 mb-5">
-              <span class="font-display text-2xl text-cinnabar-600 dark:text-cinnabar-400">叁</span>
-              <h2 class="font-display text-lg text-ink-700 dark:text-paper-50">析 文</h2>
-              <div class="brush-divider flex-1"></div>
-              <span class="font-latin italic text-xs text-ink-300 dark:text-paper-300 tracking-seal">III. ANALYSE</span>
-            </div>
-            <button
-              :disabled="store.isAnalyzing || (!selectedLessonId && !customText.trim())"
-              class="btn-cinnabar w-full inline-flex items-center justify-center gap-3"
-              @click="analyzeText"
-            >
-              <svg v-if="store.isAnalyzing" class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-              </svg>
-              <span v-if="store.isAnalyzing">析文中...</span>
-              <template v-else>
-                <span>以 AI 析文</span>
-                <span class="font-latin italic">→</span>
-              </template>
-            </button>
-          </section>
-
-          <!-- 场景编辑 -->
-          <section class="paper-panel paper-panel-edge p-7">
-            <div class="flex items-center gap-3 mb-5">
-              <span class="font-display text-2xl text-cinnabar-600 dark:text-cinnabar-400">肆</span>
-              <h2 class="font-display text-lg text-ink-700 dark:text-paper-50">修 景</h2>
-              <div class="brush-divider flex-1"></div>
-              <span class="font-latin italic text-xs text-ink-300 dark:text-paper-300 tracking-seal">
-                {{ store.scenes.length }} 幕
-              </span>
-            </div>
-
-            <div v-if="store.scenes.length === 0" class="text-center py-8">
-              <div class="font-display text-7xl text-ink-500/10 dark:text-paper-300/10 mb-2">幕</div>
-              <p class="font-kai text-sm text-ink-400 dark:text-paper-300 mb-1">尚无场景</p>
-              <p class="font-latin italic text-xs text-ink-300 dark:text-paper-400">awaiting analysis</p>
-            </div>
-
-            <div v-else class="space-y-3">
-              <div
-                v-for="(scene, index) in store.scenes"
-                :key="index"
-                class="border border-ink-500/15 dark:border-paper-300/10 bg-paper-50 dark:bg-ink-600 p-4 relative"
-              >
-                <!-- 编号印 -->
-                <div class="flex items-center justify-between mb-2">
-                  <div class="flex items-center gap-2">
-                    <span class="seal seal-tag text-xs">{{ ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'][index] || (index + 1) }}</span>
-                    <span class="font-display text-sm text-ink-700 dark:text-paper-100">第 {{ index + 1 }} 幕</span>
-                  </div>
-                  <div class="flex gap-1">
-                    <button
-                      class="w-7 h-7 flex items-center justify-center text-ink-400 hover:text-cinnabar-500 hover:bg-cinnabar-50 dark:hover:bg-cinnabar-900/30 transition-colors disabled:opacity-30"
-                      :disabled="index === 0"
-                      title="上移"
-                      @click="store.moveSceneUp(index)"
-                    >
-                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>
-                    </button>
-                    <button
-                      class="w-7 h-7 flex items-center justify-center text-ink-400 hover:text-cinnabar-500 hover:bg-cinnabar-50 dark:hover:bg-cinnabar-900/30 transition-colors disabled:opacity-30"
-                      :disabled="index === store.scenes.length - 1"
-                      title="下移"
-                      @click="store.moveSceneDown(index)"
-                    >
-                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-                    </button>
-                    <button
-                      class="w-7 h-7 flex items-center justify-center text-ink-400 hover:text-cinnabar-700 hover:bg-cinnabar-50 dark:hover:bg-cinnabar-900/30 transition-colors"
-                      title="删除"
-                      @click="store.removeScene(index)"
-                    >
-                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                    </button>
-                  </div>
-                </div>
-                <textarea
-                  v-model="scene.description_cn"
-                  rows="2"
-                  class="w-full px-3 py-2 text-sm border border-ink-500/15 dark:border-paper-300/10 bg-transparent dark:text-paper-100 focus:border-cinnabar-500 transition-colors font-kai resize-none"
-                  placeholder="场景描述（中文）"
-                  @blur="store.updateScene(index, { description_cn: scene.description_cn })"
-                />
-              </div>
-            </div>
-
-            <button
-              v-if="store.scenes.length > 0"
-              :disabled="store.isGenerating"
-              class="btn-ink w-full mt-5 inline-flex items-center justify-center gap-3"
-              @click="generateImages"
-            >
-              <svg v-if="store.isGenerating" class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-              </svg>
-              <span v-if="store.isGenerating">绘卷中...</span>
-              <template v-else>
-                <span>开 始 绘 卷</span>
-                <span class="font-latin italic">→</span>
-              </template>
-            </button>
-          </section>
+          </div>
 
           <!-- 进度提示 -->
-          <section v-if="store.progressMsg"
-                   class="border-l-2 border-cinnabar-500 bg-cinnabar-50 dark:bg-cinnabar-900/15 px-5 py-4">
-            <p class="font-kai text-cinnabar-700 dark:text-cinnabar-300 text-center">
+          <div v-if="store.progressMsg && currentStep !== 1" class="bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 rounded-lg p-4">
+            <p class="text-primary-700 dark:text-primary-300 text-center font-medium">
               {{ store.progressMsg }}
             </p>
-          </section>
+          </div>
+
+          <!-- 保存 & 导出 (生成完成后显示) -->
+          <div v-if="store.isGeneratingComplete" class="bg-white dark:bg-surface-800 rounded-lg p-5 border border-surface-300 dark:border-surface-800 space-y-4">
+            <h3 class="text-base font-semibold text-surface-800 dark:text-surface-200 font-heading">
+              保存作品
+            </h3>
+            <input
+              v-model="saveTitle"
+              type="text"
+              placeholder="作品标题（可选，留空自动生成）"
+              class="w-full px-4 py-2.5 text-sm border border-surface-300 dark:border-surface-800 rounded-md bg-white dark:bg-surface-700 text-surface-800 dark:text-surface-200 placeholder-surface-400 dark:placeholder-surface-400 focus:ring-2 focus:ring-success-500 focus:border-success-500 transition-colors"
+            >
+            <div class="flex gap-3">
+              <button
+                class="flex-1 px-6 py-3 text-white font-medium rounded-lg bg-success-500
+                       transition-all duration-200 flex items-center justify-center gap-2
+                       hover:bg-success-600 active:bg-success-700"
+                @click="saveWork"
+              >
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                </svg>
+                <span>保存作品</span>
+              </button>
+              <button
+                class="flex-1 px-6 py-3 text-white font-medium rounded-lg bg-secondary-500
+                       transition-all duration-200 flex items-center justify-center gap-2
+                       hover:bg-secondary-600 active:bg-secondary-700"
+                @click="exportWork"
+              >
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                <span>导出长图</span>
+              </button>
+            </div>
+          </div>
         </div>
 
-        <!-- ============ 右侧：预览区 ============ -->
-        <div class="lg:sticky lg:top-20 self-start space-y-4">
-          <section class="paper-panel paper-panel-edge flex flex-col min-h-[60vh]">
-            <div class="flex items-center justify-between px-6 py-4 border-b border-ink-500/10 dark:border-paper-300/10">
-              <div class="flex items-center gap-3">
-                <span class="font-display text-2xl text-cinnabar-600 dark:text-cinnabar-400">伍</span>
-                <h2 class="font-display text-lg text-ink-700 dark:text-paper-50">观 卷</h2>
-              </div>
-              <span v-if="store.taskStatus"
-                    class="font-latin italic text-sm text-cinnabar-600 dark:text-cinnabar-400 tracking-widest">
-                {{ store.taskStatus.completed }} / {{ store.taskStatus.total }}
-              </span>
-            </div>
-
-            <!-- 空状态 -->
-            <div v-if="store.scenes.length === 0" class="flex-1 flex flex-col items-center justify-center text-center p-10">
-              <div class="relative mb-6">
-                <div class="w-24 h-24 rounded-full border-2 border-cinnabar-500/30"></div>
-                <div class="absolute inset-3 rounded-full border border-dashed border-ink-300/40"></div>
-                <div class="absolute inset-0 flex items-center justify-center">
-                  <span class="font-display text-5xl text-cinnabar-500/40">画</span>
-                </div>
-              </div>
-              <p class="font-display text-lg text-ink-700 dark:text-paper-50 mb-1">画卷待绘</p>
-              <p class="font-kai text-sm text-ink-400 dark:text-paper-300">先择文析景，方得观卷</p>
-            </div>
-
-            <!-- 单张 -->
-            <div v-if="store.scenes.length === 1" class="flex-1 overflow-y-auto p-6">
-              <div class="relative w-full aspect-square bg-paper-200 dark:bg-ink-500 overflow-hidden">
-                <img
-                  v-if="store.taskStatus?.images[0]?.status === 'completed'"
-                  :src="store.taskStatus?.images[0]?.url"
-                  :alt="store.scenes[0]?.description_cn"
-                  class="w-full h-full object-contain"
-                  loading="lazy"
-                >
-                <div v-else-if="store.taskStatus?.images[0]?.status === 'processing'"
-                     class="absolute inset-0 flex flex-col items-center justify-center bg-cinnabar-50 dark:bg-ink-600">
-                  <div class="w-10 h-10 border-2 border-cinnabar-300 border-t-cinnabar-600 rounded-full animate-spin mb-3"></div>
-                  <span class="font-kai text-sm text-cinnabar-700 dark:text-cinnabar-300">绘卷中...</span>
-                </div>
-                <div v-else-if="store.taskStatus?.images[0]?.status === 'failed'"
-                     class="absolute inset-0 flex flex-col items-center justify-center bg-cinnabar-50 dark:bg-ink-600">
-                  <span class="font-display text-3xl text-cinnabar-600 mb-2">败</span>
-                  <span class="font-kai text-sm text-cinnabar-700">绘卷未成</span>
-                </div>
-                <div v-else class="absolute inset-0 flex flex-col items-center justify-center">
-                  <span class="font-kai text-sm text-ink-400">待绘</span>
-                </div>
-
-                <!-- 印章角标 -->
-                <div class="absolute bottom-3 right-3 seal seal-tag text-[10px]">漫游</div>
-              </div>
-            </div>
-
-            <!-- 多张 -->
-            <div v-if="store.scenes.length > 1" class="flex-1 overflow-y-auto scrollbar-none">
-              <div
-                v-for="(scene, index) in store.displayedScenes"
-                :key="index"
-                class="border-b border-ink-500/10 dark:border-paper-300/10 last:border-b-0"
-              >
-                <div class="relative w-full bg-paper-200 dark:bg-ink-500" style="padding-bottom: 100%;">
-                  <img
-                    v-if="store.taskStatus?.images[index]?.status === 'completed'"
-                    :src="store.taskStatus.images[index].url"
-                    :alt="scene.description_cn"
-                    class="absolute inset-0 w-full h-full object-contain"
-                    loading="lazy"
-                  >
-                  <div v-else-if="store.taskStatus?.images[index]?.status === 'processing'"
-                       class="absolute inset-0 flex flex-col items-center justify-center bg-cinnabar-50/50 dark:bg-ink-600">
-                    <div class="w-10 h-10 border-2 border-cinnabar-300 border-t-cinnabar-600 rounded-full animate-spin mb-3"></div>
-                    <span class="font-kai text-sm text-cinnabar-700 dark:text-cinnabar-300">绘卷中...</span>
-                  </div>
-                  <div v-else-if="store.taskStatus?.images[index]?.status === 'failed'"
-                       class="absolute inset-0 flex flex-col items-center justify-center bg-cinnabar-50/50 dark:bg-ink-600">
-                    <span class="font-display text-3xl text-cinnabar-600 mb-2">败</span>
-                    <span class="font-kai text-sm text-cinnabar-700">绘卷未成</span>
-                  </div>
-                  <div v-else class="absolute inset-0 flex flex-col items-center justify-center">
-                    <span class="font-display text-5xl text-ink-500/15 dark:text-paper-300/10">
-                      {{ ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'][index] || (index + 1) }}
-                    </span>
-                    <span class="font-kai text-xs text-ink-400 mt-2">待绘</span>
-                  </div>
-
-                  <!-- 幕次号 -->
-                  <div class="absolute top-3 left-3 seal seal-tag text-[10px]">
-                    {{ ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'][index] || (index + 1) }}
-                  </div>
-                  <!-- 印章角标 -->
-                  <div class="absolute bottom-3 right-3 seal seal-tag text-[10px]">漫游</div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- 保存 & 导出 -->
-          <section v-if="store.isGeneratingComplete" class="grid grid-cols-2 gap-3">
-            <button class="btn-ink inline-flex items-center justify-center gap-2" @click="saveWork">
-              <span>入 藏</span>
-              <span class="font-latin italic text-xs">SAVE</span>
-            </button>
-            <button class="btn-cinnabar inline-flex items-center justify-center gap-2" @click="exportWork">
-              <span>装 裱</span>
-              <span class="font-latin italic text-xs">EXPORT</span>
-            </button>
-          </section>
+        <!-- 右侧预览区 (35%) -->
+        <div class="hidden lg:block">
+          <WorkspacePreviewPanel
+            :scenes="store.scenes"
+            :task-status="store.taskStatus"
+            :current-step="currentStep"
+            :displayed-scenes="store.displayedScenes"
+            @open-lightbox="openLightbox"
+          />
         </div>
       </div>
     </main>
+
+    <!-- Lightbox -->
+    <Teleport to="body">
+      <Transition
+        enter-active-class="transition-opacity duration-200"
+        enter-from-class="opacity-0"
+        enter-to-class="opacity-100"
+        leave-active-class="transition-opacity duration-150"
+        leave-from-class="opacity-100"
+        leave-to-class="opacity-0"
+      >
+        <div
+          v-if="lightboxOpen"
+          class="fixed inset-0 z-[9999] bg-black/90 flex items-center justify-center"
+          @keydown.esc="closeLightbox"
+          @click.self="closeLightbox"
+        >
+          <!-- Close button -->
+          <button
+            class="absolute top-4 right-4 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white text-xl transition-colors"
+            @click="closeLightbox"
+          >
+            ✕
+          </button>
+
+          <!-- Prev arrow -->
+          <button
+            v-if="lightboxSceneIndex > 0"
+            class="absolute left-4 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white text-xl transition-colors"
+            @click="prevScene"
+          >
+            ‹
+          </button>
+
+          <!-- Next arrow -->
+          <button
+            v-if="store.scenes && lightboxSceneIndex < store.scenes.length - 1"
+            class="absolute right-4 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white text-xl transition-colors"
+            @click="nextScene"
+          >
+            ›
+          </button>
+
+          <!-- 整页漫画（放大查看） -->
+          <div
+            v-if="store.scenes[lightboxSceneIndex]"
+            class="max-w-[88vw] max-h-[85vh] overflow-auto bg-neutral-900 rounded-lg"
+            :style="{ transform: `scale(${lightboxScale})`, transformOrigin: 'center' }"
+            @click.stop
+          >
+            <WorkspaceComicPage
+              :scene="store.scenes[lightboxSceneIndex]"
+              :panel-images="scenePanelImages(lightboxSceneIndex)"
+              :show-order-badge="true"
+              class="max-w-4xl mx-auto"
+            />
+          </div>
+
+          <!-- Zoom controls -->
+          <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-3 bg-white/10 rounded-full px-4 py-2">
+            <button
+              class="w-8 h-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white text-sm transition-colors"
+              @click="zoomOut"
+            >
+              −
+            </button>
+            <span class="text-white text-sm font-medium min-w-[3rem] text-center">{{ Math.round(lightboxScale * 100) }}%</span>
+            <button
+              class="w-8 h-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white text-sm transition-colors"
+              @click="zoomIn"
+            >
+              +
+            </button>
+          </div>
+
+          <!-- Counter -->
+          <div class="absolute top-4 left-4 z-10 text-white/70 text-sm">
+            场景 {{ lightboxSceneIndex + 1 }} / {{ store.scenes?.length || 0 }}
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>

@@ -1,6 +1,7 @@
-export default defineEventHandler(async () => {
-  const response = await $fetch('http://localhost:8001/api/lessons', {
-    method: 'GET',
-  })
-  return response
+import { requireLogin } from '~~/server/utils/auth'
+import { getLessons } from '~~/server/utils/local-db'
+
+export default defineEventHandler(async (event) => {
+  await requireLogin(event)
+  return getLessons()
 })

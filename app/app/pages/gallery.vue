@@ -1,209 +1,212 @@
 <script setup lang="ts">
 import type { Work } from '~/types/api'
+import { Eye } from 'lucide-vue-next'
 
 const { fetchPublicWorks } = useWorks()
+const { styleBadge, formatDate, getThumbnail } = useThemeColors()
 
 const works = ref<Work[]>([])
 const isLoading = ref(true)
+const error = ref<string | null>(null)
 
-// 画风对应的印章款样式
-const styleSealClass: Record<string, string> = {
-  '写实古风': 'seal seal-tag',
-  '水墨风格': 'seal-outline',
-  '彩色插画': 'seal seal-tag',
-}
+// 搜索和筛选
+const searchQuery = ref('')
+const selectedStyle = ref<string>('')
 
-// 画风对应的中文小标签
-const styleSubtitle: Record<string, string> = {
-  '写实古风': '古意',
-  '水墨风格': '墨韵',
-  '彩色插画': '彩绘',
-}
+const styleOptions = ['写实古风', '水墨风格', '彩色插画']
 
-// 格式化时间
-const formatDate = (dateStr: string) => {
-  const date = new Date(dateStr)
-  return date.toLocaleDateString('zh-CN', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  })
-}
-
-// 中文数字
-const toCnNum = (n: number): string => {
-  const cn = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
-  if (n <= 10) return cn[n]
-  if (n < 20) return `十${cn[n - 10]}`
-  return `${cn[Math.floor(n / 10)]}十${cn[n % 10] === '零' ? '' : cn[n % 10]}`
-}
-
-// 获取封面图
-const getThumbnail = (work: Work) => {
-  if (work.thumbnail) return work.thumbnail
-  if (work.images && work.images.length > 0) return work.images[0]
-  return ''
-}
-
-onMounted(async () => {
-  works.value = await fetchPublicWorks()
-  isLoading.value = false
+// 筛选后的作品
+const filteredWorks = computed(() => {
+  let result = works.value
+  if (searchQuery.value.trim()) {
+    const q = searchQuery.value.trim().toLowerCase()
+    result = result.filter(w =>
+      w.title.toLowerCase().includes(q) ||
+      (w.scenes && w.scenes.some(s => s.description_cn.toLowerCase().includes(q)))
+    )
+  }
+  if (selectedStyle.value) {
+    result = result.filter(w => w.style === selectedStyle.value)
+  }
+  return result
 })
+
+const loadWorks = async () => {
+  isLoading.value = true
+  error.value = null
+  try {
+    works.value = await fetchPublicWorks()
+  } catch (e: any) {
+    error.value = e?.message || '加载作品失败，请稍后重试'
+  } finally {
+    isLoading.value = false
+  }
+}
+
+onMounted(() => loadWorks())
 </script>
 
 <template>
-  <div>
-    <!-- 页面顶部：编辑式版心 -->
-    <section class="relative border-b border-ink-500/15 dark:border-paper-300/10 overflow-hidden">
-      <!-- 背景墨晕 -->
-      <div class="absolute inset-0 pointer-events-none">
-        <div class="ink-wash"
-             style="top: -20%; right: -10%; width: 50%; height: 100%;
-                    background: radial-gradient(ellipse at center, rgba(184, 64, 63, 0.10), transparent 70%);"></div>
+  <div class="min-h-[calc(100vh-8rem)] bg-surface-50 dark:bg-surface-900 transition-colors">
+    <!-- 页面标题 -->
+    <div class="bg-white/80 dark:bg-surface-800/80 backdrop-blur-sm border-b border-surface-300/50 dark:border-neutral-700/50">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <h1 class="text-2xl font-bold text-neutral-700 dark:text-neutral-100 font-heading">展示广场</h1>
+        <p class="mt-1 text-neutral-500 dark:text-neutral-400 text-sm">发现并欣赏由 AI 生成的课文漫画作品</p>
       </div>
-
-      <div class="relative max-w-editorial mx-auto px-6 lg:px-12 py-16 lg:py-20">
-        <!-- 卷首信息 -->
-        <div class="grid lg:grid-cols-12 gap-8 items-end">
-          <div class="lg:col-span-8">
-            <div class="flex items-center gap-3 mb-4">
-              <div class="folio">卷 · 三</div>
-              <div class="brush-divider w-24"></div>
-              <div class="font-latin italic text-xs text-cinnabar-600 dark:text-cinnabar-400 tracking-seal">III. GALLERY</div>
-            </div>
-
-            <h1 class="font-display text-6xl md:text-7xl lg:text-8xl text-ink-700 dark:text-paper-50 mb-4 leading-none">
-              展示<span class="brush-underline text-cinnabar-600 dark:text-cinnabar-400">广场</span>
-            </h1>
-
-            <p class="font-kai text-lg md:text-xl text-ink-500 dark:text-paper-300 max-w-2xl leading-relaxed mt-6">
-              赏 AI 所绘之画册，览同好共构之画卷。<br>
-              <span class="font-latin italic text-sm text-ink-300 dark:text-paper-400">An ever-growing album of AI-painted tales</span>
-            </p>
-          </div>
-
-          <!-- 右侧统计 -->
-          <div class="lg:col-span-4 flex flex-col items-end gap-2">
-            <div class="flex items-baseline gap-2">
-              <span class="font-display text-6xl text-cinnabar-600 dark:text-cinnabar-400 leading-none">{{ works.length }}</span>
-              <span class="font-kai text-sm text-ink-400 dark:text-paper-300">幅</span>
-            </div>
-            <div class="font-latin italic text-xs text-ink-300 dark:text-paper-300 tracking-seal">PUBLIC · ALBUMS</div>
-          </div>
-        </div>
-      </div>
-    </section>
+    </div>
 
     <!-- 内容区域 -->
-    <section class="max-w-editorial mx-auto px-6 lg:px-12 py-16">
-      <!-- 加载状态 -->
-      <div v-if="isLoading" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-        <div
-          v-for="i in 9"
-          :key="i"
-          class="paper-panel aspect-[4/5] relative overflow-hidden"
-        >
-          <div class="absolute inset-0 animate-pulse-bg"></div>
-          <!-- 装饰水印 -->
-          <div class="absolute top-4 right-4 font-display text-7xl text-ink-500/5">
-            {{ toCnNum(i) }}
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <!-- 搜索和筛选栏 -->
+      <div v-if="!isLoading && works.length > 0" class="mb-6">
+        <div class="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+          <!-- 搜索框 -->
+          <div class="relative flex-1 w-full">
+            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+            <input
+              v-model="searchQuery"
+              type="text"
+              placeholder="搜索作品标题或场景描述..."
+              aria-label="搜索作品"
+              class="w-full pl-9 pr-4 py-2 bg-white dark:bg-surface-800 border border-surface-300 dark:border-neutral-700
+                     rounded-xl text-sm text-neutral-700 dark:text-neutral-100 placeholder-neutral-400
+                     focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors"
+            >
+          </div>
+          <!-- 画风筛选 -->
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <button
+              :class="[
+                'px-3 py-1.5 rounded text-xs font-medium transition-all duration-200',
+                !selectedStyle
+                  ? 'bg-primary-500 text-white'
+                  : 'bg-white dark:bg-surface-800 text-neutral-600 dark:text-neutral-300 border border-surface-300 dark:border-neutral-700 hover:border-primary-300'
+              ]"
+              @click="selectedStyle = ''"
+            >
+              全部
+            </button>
+            <button
+              v-for="style in styleOptions"
+              :key="style"
+              :class="[
+                'px-3 py-1.5 rounded text-xs font-medium transition-all duration-200',
+                selectedStyle === style
+                  ? 'bg-primary-500 text-white'
+                  : 'bg-white dark:bg-surface-800 text-neutral-600 dark:text-neutral-300 border border-surface-300 dark:border-neutral-700 hover:border-primary-300'
+              ]"
+              @click="selectedStyle = selectedStyle === style ? '' : style"
+            >
+              {{ style }}
+            </button>
+            <span v-if="!isLoading" class="text-xs text-neutral-400 ml-1">
+              {{ filteredWorks.length }} 个作品
+            </span>
           </div>
         </div>
       </div>
 
-      <!-- 空状态 -->
-      <div v-else-if="works.length === 0" class="text-center py-32">
-        <div class="inline-block mb-8">
-          <div class="seal" style="width: 5rem; height: 5rem; padding: 0.5rem; font-size: 1.4rem; line-height: 1.2; writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 0.05em;">
-            空<br>卷
+      <!-- 加载状态 -->
+      <div v-if="isLoading" class="columns-1 sm:columns-2 lg:columns-3 gap-4 space-y-4">
+        <div v-for="i in 8" :key="i" class="break-inside-avoid bg-white dark:bg-surface-800 rounded-lg overflow-hidden shadow-sm">
+          <div class="aspect-[4/3] bg-surface-200 dark:bg-neutral-700 animate-pulse" />
+          <div class="p-4 space-y-3">
+            <div class="h-4 bg-surface-200 dark:bg-neutral-700 rounded animate-pulse w-3/4" />
+            <div class="h-3 bg-surface-200 dark:bg-neutral-700 rounded animate-pulse w-1/2" />
           </div>
         </div>
-        <h3 class="font-display text-3xl text-ink-700 dark:text-paper-50 mb-3">尚无公开展卷</h3>
-        <p class="font-kai text-base text-ink-500 dark:text-paper-300 mb-8">
-          画册虚位以待 · 成为首位钤印展示之人
-        </p>
-        <NuxtLink to="/workspace" class="btn-cinnabar inline-flex items-center gap-3">
-          <span>开始创作</span>
-          <span class="font-latin italic">→</span>
+      </div>
+
+      <!-- 错误状态 -->
+      <div v-else-if="error" class="text-center py-16">
+        <div class="text-5xl mb-4">⚠️</div>
+        <h3 class="text-lg font-semibold text-neutral-700 dark:text-neutral-100 mb-2">加载失败</h3>
+        <p class="text-neutral-500 dark:text-neutral-400 mb-6">{{ error }}</p>
+        <button
+          class="inline-flex items-center px-5 py-2.5 bg-primary-500 text-white rounded-lg font-medium
+                 hover:bg-primary-600 transition-colors"
+          @click="loadWorks"
+        >
+          重新加载
+        </button>
+      </div>
+
+      <!-- 空状态（无作品） -->
+      <div v-else-if="works.length === 0" class="text-center py-16">
+        <div class="text-5xl mb-4">📚</div>
+        <h3 class="text-lg font-semibold text-neutral-700 dark:text-neutral-100 mb-2">暂无公开作品</h3>
+        <p class="text-neutral-500 dark:text-neutral-400 mb-6">成为第一个分享作品的人吧！</p>
+        <NuxtLink
+          to="/workspace"
+          class="inline-flex items-center px-5 py-2.5 bg-primary-500 text-white rounded-lg font-medium
+                 hover:bg-primary-600 transition-colors"
+        >
+          去创作
         </NuxtLink>
       </div>
 
-      <!-- 作品网格 -->
-      <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+      <!-- 搜索无结果 -->
+      <div v-else-if="filteredWorks.length === 0" class="text-center py-16">
+        <div class="text-5xl mb-4">🔍</div>
+        <h3 class="text-lg font-semibold text-neutral-700 dark:text-neutral-100 mb-2">没有找到匹配的作品</h3>
+        <p class="text-neutral-500 dark:text-neutral-400 mb-6">试试其他关键词或筛选条件</p>
+        <button
+          class="inline-flex items-center px-5 py-2.5 bg-surface-200 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300 rounded-lg font-medium
+                 hover:bg-surface-300 dark:hover:bg-neutral-600 transition-colors"
+          @click="searchQuery = ''; selectedStyle = ''"
+        >
+          清除筛选
+        </button>
+      </div>
+
+      <!-- 作品瀑布流 -->
+      <div v-else class="columns-1 sm:columns-2 lg:columns-3 gap-4 space-y-4">
         <NuxtLink
-          v-for="(work, i) in works"
+          v-for="work in filteredWorks"
           :key="work.id"
           :to="`/watch/${work.id}`"
-          class="paper-panel paper-panel-edge group relative overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-paper-lg"
+          class="group break-inside-avoid bg-white/90 dark:bg-surface-800/90 backdrop-blur-sm rounded-xl overflow-hidden shadow-lg
+                 border border-surface-300/60 dark:border-neutral-700/60
+                 hover:shadow-xl hover:border-primary-300 dark:hover:border-primary-700
+                 hover:-translate-y-0.5 transition-all duration-300"
         >
           <!-- 封面图 -->
-          <div class="aspect-[4/5] overflow-hidden relative bg-paper-200 dark:bg-ink-500">
+          <div class="aspect-[4/3] overflow-hidden bg-surface-100 dark:bg-neutral-700">
             <img
-              v-if="getThumbnail(work)"
               :src="getThumbnail(work)"
               :alt="work.title"
-              class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+              loading="lazy"
+              decoding="async"
+              class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
             >
-            <div v-else class="w-full h-full flex items-center justify-center">
-              <div class="font-display text-9xl text-ink-500/10 dark:text-paper-300/10">{{ toCnNum(i + 1) }}</div>
-            </div>
-
-            <!-- 卷数次号水印 -->
-            <div class="absolute top-3 left-3 font-display text-5xl text-paper-50/40 select-none pointer-events-none">
-              {{ toCnNum(i + 1) }}
-            </div>
-
-            <!-- 画风印章 -->
-            <div class="absolute top-3 right-3">
-              <span :class="styleSealClass[work.style] || 'seal-outline'">
-                {{ styleSubtitle[work.style] || work.style }}
-              </span>
-            </div>
-
-            <!-- 底部渐隐 -->
-            <div class="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-ink-700/60 to-transparent"></div>
-
-            <!-- 底部叠字 -->
-            <div class="absolute bottom-3 left-3 right-3 flex items-end justify-between">
-              <div class="font-latin italic text-xs text-paper-50/90 tracking-widest">
-                {{ formatDate(work.created_at) }}
-              </div>
-              <div class="font-latin italic text-xs text-paper-50/80">
-                {{ String(i + 1).padStart(2, '0') }} / {{ String(works.length).padStart(2, '0') }}
-              </div>
-            </div>
           </div>
 
-          <!-- 信息条 -->
-          <div class="p-5 relative">
-            <!-- 标题 -->
-            <h3 class="font-display text-xl text-ink-700 dark:text-paper-50 mb-2 group-hover:text-cinnabar-600 dark:group-hover:text-cinnabar-400 transition-colors">
+          <!-- 信息 -->
+          <div class="p-3">
+            <h3 class="font-medium text-sm text-neutral-700 dark:text-neutral-100 truncate mb-1">
               {{ work.title }}
             </h3>
-
             <!-- 课文描述 -->
-            <p v-if="work.scenes && work.scenes.length > 0"
-               class="font-kai text-sm text-ink-500 dark:text-paper-300 mb-3 line-clamp-2 leading-relaxed">
+            <p v-if="work.scenes && work.scenes.length > 0" class="text-xs text-neutral-500 dark:text-neutral-400 mb-2 line-clamp-2">
               {{ work.scenes[0]?.description_cn || '' }}
             </p>
-
-            <!-- 底部信息 -->
-            <div class="flex items-center justify-between pt-3 border-t border-ink-500/10 dark:border-paper-300/10">
-              <span class="font-kai text-xs text-ink-400 dark:text-paper-300">{{ work.style }}</span>
-              <span class="font-latin italic text-xs text-cinnabar-600 dark:text-cinnabar-400 tracking-widest group-hover:translate-x-1 transition-transform">
-                览 →
+            <div class="flex items-center justify-between mt-2">
+              <span
+                :class="['px-2 py-0.5 rounded-full text-[11px] font-medium', styleBadge(work.style)]"
+              >
+                {{ work.style }}
+              </span>
+              <span class="inline-flex items-center gap-0.5 text-xs text-neutral-400">
+                <Eye class="w-3 h-3" aria-hidden="true" />
+                {{ work.view_count ?? 0 }}
               </span>
             </div>
           </div>
         </NuxtLink>
       </div>
-
-      <!-- 底部落款 -->
-      <div v-if="!isLoading && works.length > 0" class="mt-20 flex items-center justify-center gap-4">
-        <div class="brush-divider w-32"></div>
-        <div class="seal seal-tag text-xs">已展 {{ works.length }} 卷</div>
-        <div class="brush-divider w-32"></div>
-      </div>
-    </section>
+    </div>
   </div>
 </template>

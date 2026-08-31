@@ -20,11 +20,18 @@ export function useTaskPoll() {
         const status = await $fetch<TaskStatus>(`/api/task/${taskId}`)
         store.setTaskStatus(status)
 
+        // 逐格回绑：新任务 images[] 带 panel_id → panels[].image_url；旧任务按 index 回退
+        for (const img of status.images || []) {
+          if (!img.url) continue
+          if (img.panel_id) store.bindPanelImage(img.panel_id, img.url)
+          else store.bindImageByIndex(img.index, img.url)
+        }
+
         if (status.status === 'processing') {
           const remaining = Math.max(0, status.total - status.completed)
           const eta = remaining * 10
           store.setProgressMsg(
-            `生成中 ${status.completed}/${status.total} (${Math.round((status.completed / status.total) * 100)}%) - 约${eta}秒`
+            `生成中 ${status.completed}/${status.total} 格 (${Math.round((status.completed / status.total) * 100)}%) - 约${eta}秒`
           )
         }
         else if (status.status === 'completed') {

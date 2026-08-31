@@ -1,117 +1,108 @@
 <template>
-  <div class="relative min-h-[calc(100vh-4rem)] flex items-center justify-center px-6 py-20 overflow-hidden">
-    <!-- 墨韵背景 -->
-    <div class="absolute inset-0 pointer-events-none">
-      <div class="ink-wash"
-           style="top: -10%; left: -5%; width: 50%; height: 60%;
-                  background: radial-gradient(ellipse at center, rgba(184, 64, 63, 0.10), transparent 70%);"></div>
-      <div class="ink-wash"
-           style="bottom: -10%; right: -5%; width: 50%; height: 60%;
-                  background: radial-gradient(ellipse at center, rgba(139, 111, 71, 0.12), transparent 70%);"></div>
-    </div>
-
-    <!-- 左侧装饰：竖排引文（仅大屏） -->
-    <div class="hidden lg:block absolute left-32 top-1/2 -translate-y-1/2">
-      <div class="scroll-title text-3xl text-ink-500/40 dark:text-paper-300/40 leading-relaxed"
-           style="letter-spacing: 0.5em;">
-        来 · 登 录 · 共 · 游 · 画 · 册
+  <div class="min-h-screen flex bg-surface-50 dark:bg-surface-900">
+    <!-- 左侧品牌展示 -->
+    <div class="hidden lg:flex lg:w-2/5 bg-surface-900 dark:bg-surface-950 relative overflow-hidden">
+      <!-- 背景装饰 -->
+      <div class="absolute inset-0 opacity-20">
+        <div class="absolute top-20 left-10 w-32 h-32 rounded-full bg-primary-500/30 blur-3xl" />
+        <div class="absolute bottom-20 right-10 w-40 h-40 rounded-full bg-secondary-500/30 blur-3xl" />
+      </div>
+      <!-- 内容 -->
+      <div class="relative z-10 flex flex-col items-center justify-center w-full px-12">
+        <h1 class="text-4xl font-bold text-white mb-4 font-heading">课文漫游</h1>
+        <p class="text-neutral-400 text-center text-lg">让课文活起来，画出你的故事</p>
+        <div class="mt-12 grid grid-cols-2 gap-4">
+          <div class="w-24 h-32 rounded-lg bg-surface-800 border border-surface-700 flex items-center justify-center text-neutral-500 text-xs">
+            作品展示
+          </div>
+          <div class="w-24 h-32 rounded-lg bg-surface-800 border border-surface-700 flex items-center justify-center text-neutral-500 text-xs">
+            AI 创作
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- 右侧装饰：印章 -->
-    <div class="hidden lg:block absolute right-24 top-20">
-      <div class="seal animate-seal" style="width: 4.5rem; height: 4.5rem; padding: 0.5rem; font-size: 1.4rem; line-height: 1.2; writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 0.05em;">
-        登<br>录
-      </div>
-    </div>
-
-    <!-- 中央表单 -->
-    <div class="relative w-full max-w-md">
-      <!-- 卷首 -->
-      <div class="mb-10 animate-ink-bloom">
-        <div class="flex items-center gap-3 mb-4">
-          <div class="folio">附 · 登录</div>
-          <div class="brush-divider w-20"></div>
-          <div class="font-latin italic text-xs text-cinnabar-600 dark:text-cinnabar-400 tracking-seal">SIGN IN</div>
-        </div>
-        <h1 class="font-display text-5xl text-ink-700 dark:text-paper-50 leading-none">
-          来 <span class="brush-underline text-cinnabar-600 dark:text-cinnabar-400">登录</span>
-        </h1>
-        <p class="font-kai text-sm text-ink-400 dark:text-paper-300 mt-4">
-          登录后即可入藏作品、览我画册
-        </p>
-      </div>
-
-      <!-- 表单 -->
-      <form @submit.prevent="handleLogin" class="paper-panel paper-panel-edge p-8 space-y-6 animate-ink-bloom delay-2">
-        <!-- 邮箱 -->
-        <div>
-          <label class="flex items-center justify-between mb-2">
-            <span class="font-display text-sm text-ink-700 dark:text-paper-100">邮 箱</span>
-            <span class="font-latin italic text-[10px] text-ink-300 dark:text-paper-300 tracking-seal">EMAIL</span>
-          </label>
-          <input
-            v-model="email"
-            type="email"
-            required
-            placeholder="your@email.com"
-            class="input-editorial"
-          />
+    <!-- 右侧表单 -->
+    <div class="flex-1 flex items-center justify-center px-4 sm:px-8">
+      <div class="w-full max-w-md">
+        <!-- 移动端标题 -->
+        <div class="text-center mb-8 lg:hidden">
+          <h1 class="text-3xl font-bold text-primary-500">课文漫游</h1>
+          <p class="text-neutral-500 mt-2">登录到您的账户</p>
         </div>
 
-        <!-- 密码 -->
-        <div>
-          <label class="flex items-center justify-between mb-2">
-            <span class="font-display text-sm text-ink-700 dark:text-paper-100">密 码</span>
-            <span class="font-latin italic text-[10px] text-ink-300 dark:text-paper-300 tracking-seal">PASSWORD</span>
-          </label>
-          <input
-            v-model="password"
-            type="password"
-            required
-            placeholder="••••••••"
-            class="input-editorial"
-          />
-        </div>
+        <div class="bg-white dark:bg-surface-800 rounded-2xl shadow-lg p-8">
+          <div class="mb-6">
+            <h2 class="text-xl font-semibold text-neutral-700 dark:text-neutral-100">欢迎回来</h2>
+            <p class="text-sm text-neutral-500 mt-1">登录后继续创作</p>
+          </div>
 
-        <!-- 错误信息 -->
-        <div v-if="error"
-             class="border-l-2 border-cinnabar-500 bg-cinnabar-50 dark:bg-cinnabar-900/15 px-4 py-3">
-          <p class="font-kai text-sm text-cinnabar-700 dark:text-cinnabar-300">{{ error }}</p>
-        </div>
+          <form @submit.prevent="handleLogin">
+            <div class="space-y-4">
+              <div>
+                <label class="block text-sm font-medium text-neutral-600 dark:text-neutral-300 mb-1.5">
+                  邮箱
+                </label>
+                <input
+                  v-model="email"
+                  type="email"
+                  required
+                  placeholder="your@email.com"
+                  aria-label="邮箱"
+                  class="w-full px-3 py-2.5 rounded-xl border border-surface-300 dark:border-neutral-700
+                         bg-white dark:bg-surface-900 text-neutral-700 dark:text-neutral-100
+                         placeholder-neutral-400 focus:ring-2 focus:ring-primary-500 focus:border-primary-500
+                         transition text-sm"
+                />
+              </div>
 
-        <!-- 提交按钮 -->
-        <button
-          type="submit"
-          :disabled="loading"
-          class="btn-cinnabar w-full inline-flex items-center justify-center gap-3"
-        >
-          <svg v-if="loading" class="animate-spin h-5 w-5" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-          </svg>
-          <span v-if="loading">登录中...</span>
-          <template v-else>
-            <span>登 录</span>
-            <span class="font-latin italic">→</span>
-          </template>
-        </button>
-      </form>
+              <div>
+                <label class="block text-sm font-medium text-neutral-600 dark:text-neutral-300 mb-1.5">
+                  密码
+                </label>
+                <input
+                  v-model="password"
+                  type="password"
+                  required
+                  placeholder="••••••••"
+                  aria-label="密码"
+                  class="w-full px-3 py-2.5 rounded-xl border border-surface-300 dark:border-neutral-700
+                         bg-white dark:bg-surface-900 text-neutral-700 dark:text-neutral-100
+                         placeholder-neutral-400 focus:ring-2 focus:ring-primary-500 focus:border-primary-500
+                         transition text-sm"
+                />
+              </div>
 
-      <!-- 注册引导 -->
-      <div class="mt-8 text-center animate-ink-bloom delay-3">
-        <p class="font-kai text-sm text-ink-400 dark:text-paper-300">
-          初来乍到？
-          <NuxtLink to="/register" class="text-cinnabar-600 dark:text-cinnabar-400 hover:underline font-medium ml-1">
-            注册新账户 →
-          </NuxtLink>
-        </p>
+              <div v-if="error" class="text-error-500 text-sm text-center bg-error-50 dark:bg-error-500/10 p-3 rounded-md">
+                {{ error }}
+              </div>
 
-        <!-- 落款 -->
-        <div class="mt-12 flex items-center justify-center gap-3">
-          <div class="brush-divider w-16"></div>
-          <div class="seal seal-tag text-[10px]">课文漫游</div>
-          <div class="brush-divider w-16"></div>
+              <button
+                type="submit"
+                :disabled="loading"
+                class="w-full py-2.5 px-4 bg-primary-500 hover:bg-primary-600 disabled:bg-primary-300
+                       text-white font-medium rounded-xl transition duration-150 flex items-center justify-center
+                       focus-visible:ring-2 focus-visible:ring-primary-300"
+              >
+                <span v-if="loading" class="mr-2">
+                  <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                  </svg>
+                </span>
+                {{ loading ? '登录中...' : '登录' }}
+              </button>
+            </div>
+          </form>
+
+          <div class="mt-6 text-center">
+            <p class="text-neutral-500 text-sm">
+              还没有账户？
+              <NuxtLink to="/register" class="text-primary-500 hover:text-primary-600 font-medium">
+                注册
+              </NuxtLink>
+            </p>
+          </div>
         </div>
       </div>
     </div>

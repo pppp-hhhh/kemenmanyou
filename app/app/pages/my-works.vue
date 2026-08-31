@@ -1,202 +1,243 @@
 <script setup lang="ts">
+import type { Work } from '~/types/api'
+
 definePageMeta({
   middleware: 'auth'
 })
 
 const authStore = useAuthStore()
-const works = ref<any[]>([])
-const loading = ref(true)
+const { styleBadge, reviewBadge, reviewLabel, formatDate, getThumbnail } = useThemeColors()
 
-onMounted(async () => {
-  try {
-    const response = await $fetch('/api/works/my', {
-      headers: {
-        Authorization: authStore.getAuthHeader()
-      }
-    })
-    works.value = response as any[]
-  } catch (error) {
-    console.error('Failed to fetch works:', error)
-  } finally {
-    loading.value = false
-  }
+const works = ref<Work[]>([])
+const isLoading = ref(true)
+const error = ref<string | null>(null)
+const deletingId = ref<number | null>(null)
+const activeTab = ref<string>('all')
+
+// 状态标签
+const tabs = [
+  { key: 'all', label: '全部' },
+  { key: 'pending', label: '待审核' },
+  { key: 'approved', label: '已公开' },
+  { key: 'rejected', label: '已拒绝' },
+]
+
+// 筛选后的作品
+const filteredWorks = computed(() => {
+  if (activeTab.value === 'all') return works.value
+  return works.value.filter(w => w.review_status === activeTab.value)
 })
 
-const reviewStatusText = (status: string) => {
-  const map: Record<string, string> = {
-    pending: '待审',
-    approved: '已展',
-    rejected: '被拒'
+// 统计
+const tabCounts = computed(() => ({
+  all: works.value.length,
+  pending: works.value.filter(w => w.review_status === 'pending').length,
+  approved: works.value.filter(w => w.review_status === 'approved').length,
+  rejected: works.value.filter(w => w.review_status === 'rejected').length,
+}))
+
+// 加载我的作品
+const loadWorks = async () => {
+  isLoading.value = true
+  error.value = null
+  try {
+    const response = await $fetch<{ data: Work[]; total: number }>('/api/works/my', {
+      headers: { Authorization: authStore.getAuthHeader() }
+    })
+    works.value = response?.data || []
+  } catch (e: any) {
+    error.value = e?.message || '加载作品失败，请稍后重试'
+  } finally {
+    isLoading.value = false
   }
-  return map[status] || status
 }
 
-const reviewStatusSeal = (status: string) => {
-  if (status === 'pending') return { cls: 'seal-outline', cn: '待' }
-  if (status === 'approved') return { cls: 'seal seal-tag', cn: '展' }
-  if (status === 'rejected') return { cls: 'seal-outline', cn: '拒' }
-  return { cls: 'seal-outline', cn: '?' }
+// 删除作品
+const deleteWork = async (work: Work) => {
+  if (!confirm(`确定要删除作品「${work.title}」吗？此操作不可恢复。`)) return
+  deletingId.value = work.id
+  try {
+    await $fetch(`/api/works/${work.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: authStore.getAuthHeader() }
+    })
+    works.value = works.value.filter(w => w.id !== work.id)
+  } catch (e: any) {
+    alert('删除失败：' + (e?.message || '请稍后重试'))
+  } finally {
+    deletingId.value = null
+  }
 }
 
-// 中文数字
-const toCnNum = (n: number): string => {
-  const cn = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
-  if (n <= 10) return cn[n]
-  if (n < 20) return `十${cn[n - 10]}`
-  return `${cn[Math.floor(n / 10)]}十${cn[n % 10] === '零' ? '' : cn[n % 10]}`
-}
+onMounted(() => loadWorks())
 </script>
 
 <template>
-  <div>
-    <!-- 顶部版心 -->
-    <section class="relative border-b border-ink-500/15 dark:border-paper-300/10 overflow-hidden">
-      <div class="absolute inset-0 pointer-events-none">
-        <div class="ink-wash"
-             style="top: -20%; left: -10%; width: 50%; height: 100%;
-                    background: radial-gradient(ellipse at center, rgba(184, 64, 63, 0.08), transparent 70%);"></div>
-      </div>
-
-      <div class="relative max-w-editorial mx-auto px-6 lg:px-12 py-12">
-        <div class="flex items-end justify-between flex-wrap gap-4">
+  <div class="min-h-[calc(100vh-8rem)] bg-surface-50 dark:bg-surface-900 transition-colors">
+    <!-- 页面标题 -->
+    <div class="bg-white dark:bg-surface-800 border-b border-surface-300 dark:border-neutral-700">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div class="flex items-center justify-between">
           <div>
-            <div class="flex items-center gap-3 mb-3">
-              <div class="folio">卷 · 四</div>
-              <div class="brush-divider w-24"></div>
-              <div class="font-latin italic text-xs text-cinnabar-600 dark:text-cinnabar-400 tracking-seal">IV. MY ALBUMS</div>
-            </div>
-            <h1 class="font-display text-5xl md:text-6xl text-ink-700 dark:text-paper-50 leading-none">
-              我的<span class="brush-underline text-cinnabar-600 dark:text-cinnabar-400">画册</span>
-            </h1>
-            <p class="font-kai text-sm text-ink-500 dark:text-paper-300 max-w-md leading-relaxed mt-4">
-              你所入藏的全部画册，无论展卷与否
-            </p>
+            <h1 class="text-2xl font-bold text-neutral-700 dark:text-neutral-100">我的作品</h1>
+            <p class="mt-1 text-neutral-500 dark:text-neutral-400">管理你创作的所有课文漫画作品</p>
           </div>
-
-          <NuxtLink to="/workspace" class="btn-cinnabar inline-flex items-center gap-3">
-            <span>新建一卷</span>
-            <span class="font-latin italic">+</span>
+          <NuxtLink
+            to="/workspace"
+            class="inline-flex items-center gap-2 px-5 py-2.5 bg-primary-500 text-white rounded-lg font-medium
+                   hover:bg-primary-600 transition-colors"
+          >
+            <span>创建新作品</span>
           </NuxtLink>
         </div>
       </div>
-    </section>
+    </div>
 
-    <!-- 主体 -->
-    <section class="max-w-editorial mx-auto px-6 lg:px-12 py-12">
-      <!-- 加载中 -->
-      <div v-if="loading" class="text-center py-24">
-        <div class="inline-flex items-center gap-3 mb-3">
-          <svg class="animate-spin h-6 w-6 text-cinnabar-500" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-          </svg>
-          <span class="font-kai text-sm text-ink-400 dark:text-paper-300">正在翻阅画册...</span>
+    <!-- 内容区域 -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <!-- 加载状态：骨架屏 -->
+      <div v-if="isLoading" class="space-y-4">
+        <div v-for="i in 6" :key="i" class="bg-white dark:bg-surface-800 rounded-lg p-4 flex gap-4 animate-pulse">
+          <div class="w-24 h-18 bg-surface-200 dark:bg-neutral-700 rounded flex-shrink-0" />
+          <div class="flex-1 space-y-3">
+            <div class="h-4 bg-surface-200 dark:bg-neutral-700 rounded w-1/3" />
+            <div class="h-3 bg-surface-200 dark:bg-neutral-700 rounded w-1/2" />
+          </div>
         </div>
-        <div class="font-latin italic text-xs text-ink-300 dark:text-paper-400 tracking-widest">LOADING ALBUMS</div>
+      </div>
+
+      <!-- 错误状态 -->
+      <div v-else-if="error" class="text-center py-16">
+        <div class="text-5xl mb-4">⚠️</div>
+        <h3 class="text-lg font-semibold text-neutral-700 dark:text-neutral-100 mb-2">加载失败</h3>
+        <p class="text-neutral-500 dark:text-neutral-400 mb-6">{{ error }}</p>
+        <button
+          class="inline-flex items-center px-5 py-2.5 bg-primary-500 text-white rounded-lg font-medium
+                 hover:bg-primary-600 transition-colors"
+          @click="loadWorks"
+        >
+          重新加载
+        </button>
       </div>
 
       <!-- 空状态 -->
-      <div v-else-if="works.length === 0" class="text-center py-24">
-        <div class="inline-block mb-6">
-          <div class="seal" style="width: 5rem; height: 5rem; padding: 0.5rem; font-size: 1.4rem; line-height: 1.2; writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 0.05em;">
-            空<br>卷
-          </div>
-        </div>
-        <h3 class="font-display text-3xl text-ink-700 dark:text-paper-50 mb-3">画册尚空</h3>
-        <p class="font-kai text-base text-ink-500 dark:text-paper-300 mb-6">
-          尚无入藏之作 · 创建第一卷吧
-        </p>
-        <NuxtLink to="/workspace" class="btn-cinnabar inline-flex items-center gap-3">
-          <span>开始创作</span>
-          <span class="font-latin italic">→</span>
+      <div v-else-if="works.length === 0" class="text-center py-16">
+        <div class="text-5xl mb-4">🎨</div>
+        <h3 class="text-lg font-semibold text-neutral-700 dark:text-neutral-100 mb-2">还没有作品</h3>
+        <p class="text-neutral-500 dark:text-neutral-400 mb-6">开始创作你的第一份课文漫画吧！</p>
+        <NuxtLink
+          to="/workspace"
+          class="inline-flex items-center px-5 py-2.5 bg-primary-500 text-white rounded-lg font-medium
+                 hover:bg-primary-600 transition-colors"
+        >
+          去创作
         </NuxtLink>
       </div>
 
-      <!-- 作品网格 -->
-      <div v-else>
-        <!-- 数量 -->
-        <div class="flex items-center gap-3 mb-8">
-          <div class="flex items-baseline gap-2">
-            <span class="font-display text-3xl text-cinnabar-600 dark:text-cinnabar-400">{{ works.length }}</span>
-            <span class="font-kai text-sm text-ink-400 dark:text-paper-300">卷 · 入藏</span>
-          </div>
-          <div class="brush-divider flex-1"></div>
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          <div
-            v-for="(work, i) in works"
-            :key="work.id"
-            class="paper-panel paper-panel-edge group relative overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-paper-lg"
+            <!-- 有内容 -->
+      <template v-else>
+        <!-- 状态标签页 -->
+        <div class="flex items-center gap-1 mb-6 border-b border-surface-300 dark:border-neutral-700">
+          <button
+            v-for="tab in tabs"
+            :key="tab.key"
+            class="px-4 py-2.5 text-sm font-medium transition-colors relative"
+            :class="activeTab === tab.key
+              ? 'text-primary-500'
+              : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'"
+            @click="activeTab = tab.key"
           >
-            <!-- 封面 -->
-            <div class="aspect-[4/5] overflow-hidden relative bg-paper-200 dark:bg-ink-500">
-              <img
-                v-if="work.thumbnail"
-                :src="work.thumbnail"
-                :alt="work.title"
-                class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-              />
-              <div v-else class="w-full h-full flex items-center justify-center">
-                <div class="font-display text-9xl text-ink-500/10 dark:text-paper-300/10">{{ toCnNum(i + 1) }}</div>
-              </div>
+            {{ tab.label }}
+            <span class="ml-1.5 text-xs text-neutral-400">({{ tabCounts[tab.key as keyof typeof tabCounts] }})</span>
+            <div
+              v-if="activeTab === tab.key"
+              class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-500"
+            />
+          </button>
+        </div>
 
-              <!-- 卷次水印 -->
-              <div class="absolute top-3 left-3 font-display text-5xl text-paper-50/40 select-none pointer-events-none">
-                {{ toCnNum(i + 1) }}
-              </div>
-
-              <!-- 审核状态 -->
-              <div class="absolute top-3 right-3 flex gap-2">
-                <span :class="reviewStatusSeal(work.review_status).cls + ' text-[10px]'">
-                  {{ reviewStatusSeal(work.review_status).cn }}
-                </span>
-              </div>
-
-              <div class="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-ink-700/60 to-transparent"></div>
-            </div>
-
-            <!-- 信息条 -->
-            <div class="p-5">
-              <h3 class="font-display text-xl text-ink-700 dark:text-paper-50 mb-2 truncate group-hover:text-cinnabar-600 dark:group-hover:text-cinnabar-400 transition-colors">
-                {{ work.title }}
-              </h3>
-
-              <div class="flex items-center gap-2 mb-3 flex-wrap">
-                <span class="seal-outline text-[10px]">{{ work.style }}</span>
-                <span class="font-kai text-xs text-ink-400 dark:text-paper-300">{{ reviewStatusText(work.review_status) }}</span>
-              </div>
-
-              <!-- 拒绝原因 -->
-              <div v-if="work.review_status === 'rejected' && work.reject_reason"
-                   class="mb-3 border-l-2 border-cinnabar-500 bg-cinnabar-50 dark:bg-cinnabar-900/15 px-3 py-2">
-                <p class="font-kai text-xs text-cinnabar-700 dark:text-cinnabar-300">
-                  拒因：{{ work.reject_reason }}
-                </p>
-              </div>
-
-              <div class="flex items-center justify-between pt-3 border-t border-ink-500/10 dark:border-paper-300/10">
-                <NuxtLink
-                  :to="`/watch/${work.id}`"
-                  class="font-kai text-sm text-ink-500 dark:text-paper-300 hover:text-cinnabar-600 dark:hover:text-cinnabar-400 transition-colors"
+        <!-- 作品列表 -->
+        <div v-if="filteredWorks.length === 0" class="text-center py-12 text-neutral-500">
+          该状态下暂无作品
+        </div>
+        <div v-else class="space-y-3">
+          <div
+            v-for="work in filteredWorks"
+            :key="work.id"
+            class="group bg-white dark:bg-surface-800 rounded-lg overflow-hidden shadow-sm
+                   border border-surface-300 dark:border-neutral-700
+                   hover:shadow-md hover:border-primary-200 dark:hover:border-primary-800
+                   transition-all duration-200 flex gap-4 p-4"
+          >
+            <!-- 缩略图 -->
+            <NuxtLink :to="`/watch/${work.id}`" class="flex-shrink-0">
+              <div class="w-24 h-18 overflow-hidden bg-surface-100 dark:bg-neutral-700 rounded">
+                <img
+                  :src="getThumbnail(work)"
+                  :alt="work.title"
+                  class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                 >
-                  查看详情
+              </div>
+            </NuxtLink>
+
+            <!-- 信息 -->
+            <div class="flex-1 min-w-0">
+              <div class="flex items-start justify-between gap-2">
+                <NuxtLink :to="`/watch/${work.id}`" class="block">
+                  <h3 class="font-medium text-sm text-neutral-700 dark:text-neutral-100 truncate hover:text-primary-500 transition-colors">
+                    {{ work.title }}
+                  </h3>
                 </NuxtLink>
-                <span class="font-latin italic text-xs text-cinnabar-600 dark:text-cinnabar-400 group-hover:translate-x-1 transition-transform">
-                  →
+                <div class="flex items-center gap-1.5 flex-shrink-0">
+                  <span
+                    :class="['px-2 py-0.5 rounded text-xs font-medium', styleBadge(work.style)]"
+                  >
+                    {{ work.style }}
+                  </span>
+                  <span
+                    v-if="work.review_status"
+                    :class="['px-2 py-0.5 rounded text-xs font-medium', reviewBadge(work.review_status)]"
+                  >
+                    {{ reviewLabel(work.review_status) }}
+                  </span>
+                </div>
+              </div>
+
+              <p v-if="work.review_status === 'rejected' && work.reject_reason" class="mt-1 text-xs text-error-500 line-clamp-1">
+                拒绝原因：{{ work.reject_reason }}
+              </p>
+
+              <div class="flex items-center justify-between mt-2">
+                <span class="text-xs text-neutral-400">
+                  {{ formatDate(work.created_at) }}
                 </span>
+                <div class="flex items-center gap-2">
+                  <NuxtLink
+                    :to="`/watch/${work.id}`"
+                    class="px-3 py-1.5 text-xs text-neutral-600 dark:text-neutral-300 bg-surface-100 dark:bg-neutral-700 hover:bg-surface-200 dark:hover:bg-neutral-600 rounded transition"
+                  >
+                    查看
+                  </NuxtLink>
+                  <button
+                    :disabled="deletingId === work.id"
+                    class="px-2 py-1.5 text-xs text-neutral-400 hover:text-error-500 hover:bg-error-50 dark:hover:bg-error-500/10 disabled:opacity-50 rounded transition"
+                    title="删除作品"
+                    @click="deleteWork(work)"
+                  >
+                    <svg v-if="deletingId === work.id" class="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24">
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/>
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                    </svg>
+                    <svg v-else class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                    </svg>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         </div>
-
-        <!-- 落款 -->
-        <div class="mt-16 flex items-center justify-center gap-3">
-          <div class="brush-divider w-32"></div>
-          <div class="seal seal-tag text-xs">已藏 {{ works.length }} 卷</div>
-          <div class="brush-divider w-32"></div>
-        </div>
-      </div>
-    </section>
+      </template>
+    </div>
   </div>
 </template>

@@ -1,47 +1,13 @@
+import { verify, issueTokens } from '~~/server/utils/authToken'
+import { findUserById } from '~~/server/utils/local-db'
+
 export default defineEventHandler(async (event) => {
-  const body = await readBody(event)
-  const { refresh_token } = body
-
-  const supabaseUrl = 'https://sxxngtcljzwhvajubwno.supabase.co'
-  const supabaseKey = useRuntimeConfig().supabaseKey
-
-  const authResponse: any = await $fetch(`${supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
-    method: 'POST',
-    headers: {
-      'apikey': supabaseKey,
-      'Content-Type': 'application/json',
-    },
-    body: {
-      refresh_token,
-    },
-  })
-
-  const accessToken = authResponse.access_token
-  const authHeader = `Bearer ${accessToken}`
-
-  const profile: any = await $fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${authResponse.user.id}`, {
-    method: 'GET',
-    headers: {
-      'apikey': supabaseKey,
-      'Authorization': authHeader,
-    },
-  })
-
-  const userProfile = Array.isArray(profile) ? profile[0] : profile
-
-  return {
-    access_token: authResponse.access_token,
-    refresh_token: authResponse.refresh_token,
-    expires_in: authResponse.expires_in,
-    expires_at: Math.floor(Date.now() / 1000) + authResponse.expires_in,
-    token_type: authResponse.token_type,
-    user: {
-      id: authResponse.user.id,
-      email: authResponse.user.email,
-      role: userProfile?.role || 'user',
-      display_name: userProfile?.display_name,
-      avatar_url: userProfile?.avatar_url,
-      created_at: userProfile?.created_at,
-    },
-  }
+  const { refresh_token } = await readBody(event)
+  if (!refresh_token) throw createError({ statusCode: 401, message: '缺少 refresh_token' })
+  const claim = verify(refresh_token)
+  if (!claim || claim.type !== 'refresh') throw createError({ statusCode: 401, message: 'refresh_token 无效或已过期' })
+  const user = await findUserById(claim.sub)
+  if (!user || user.status === 'banned') throw createError({ statusCode: 401, message: '用户不存在' })
+  const { access, refresh } = issueTokens({ id: user.id, role: user.role, email: user.email })
+  return { access_token: access, refresh_token: refresh, expires_in: 7200, expires_at: Math.floor(Date.now() / 1000) + 7200, token_type: 'bearer', user: { id: user.id, email: user.email, role: user.role, status: user.status } }
 })

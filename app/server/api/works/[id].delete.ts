@@ -1,13 +1,12 @@
-import { ofetch } from 'ofetch'
+import { requireLogin } from '~~/server/utils/auth'
+import { getWork, softDeleteWork } from '~~/server/utils/local-db'
 
-export default defineEventHandler(async (event): Promise<any> => {
-  const id = getRouterParam(event, 'id')
-
-  // 走 Python 后端的软删除（已更新 deleted_at）
-  const response = await ofetch(`/api/works/${id}`, {
-    method: 'DELETE',
-    baseURL: 'http://localhost:8001',
-  })
-
-  return response
+export default defineEventHandler(async (event) => {
+  const user = await requireLogin(event)
+  const id = Number(getRouterParam(event, 'id'))
+  const w = await getWork(id)
+  if (!w) throw createError({ statusCode: 404, message: '作品不存在' })
+  if (w.author_id !== user.id) throw createError({ statusCode: 403, message: '无权限' })
+  await softDeleteWork(id)
+  return { message: '已删除' }
 })

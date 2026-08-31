@@ -4,7 +4,7 @@
 
 ## 功能
 
-- **AI 漫画生成**：输入课文 → DeepSeek 分析场景 → ComfyUI 生成漫画
+- **AI 漫画生成**：输入课文 → DeepSeek 分析场景 → SenseNova U1 Fast 生成漫画
 - **三种画风**：写实古风、水墨风格、彩色插画
 - **场景编辑**：增删、移动、修改中文描述
 - **边生成边预览**：图片逐步返回，无需等待全部完成
@@ -27,7 +27,7 @@
 |------|--------|---------|
 | Nuxt 4 + Vue 3 | Nuxt Server Routes (Nitro) | FastAPI + Uvicorn (端口 8001) |
 | Pinia | 直接调用 Supabase | DeepSeek API |
-| Tailwind CSS | JWT 鉴权 + 速率限制 + 审计日志 | ComfyUI + SD1.5 |
+| Tailwind CSS | JWT 鉴权 + 速率限制 + 审计日志 | SenseNova U1 Fast（商汤日日新） |
 | TypeScript | HMAC 邀请码 | Python 3.10 |
 
 ## 架构
@@ -61,35 +61,38 @@
                                │
                                ▼
                      ┌────────────────────┐
-                     │  DeepSeek + ComfyUI│
+                     │  DeepSeek +         │
+                     │  SenseNova U1 Fast  │
                      └────────────────────┘
 ```
 
 **职责划分：**
 
-- **Nuxt Server Routes** 处理：认证、用户管理、作品/课文 CRUD、管理员操作、审计日志、邀请码 — 直接调用 Supabase
-- **Python FastAPI** 处理：AI 分析、图片生成、任务轮询、文件上传、作品保存(写入 Supabase + 静态文件)
+- **Nuxt Server Routes** 处理：认证、用户管理、作品/课文 CRUD、管理员操作、审计日志、邀请码、浏览历史 — 本地 JSON 存储（`app/server/utils/local-db.ts`，库文件 `data/app.db.json`）
+- **Python FastAPI** 处理：AI 分析（供应商可切换）、图片生成、任务轮询、文件上传、长图导出
 
 ## 快速开始
 
 ### 1. 配置环境变量
 
-根目录 `.env`：
+统一配置文件：根目录 `.env`（已 gitignore；Nuxt 经 `pnpm dev` 内置的 `--dotenv ../.env` 读取，Python 经 `config.py` 自动加载）：
 ```env
-SUPABASE_KEY=sb_publishable_xxxxx        # Supabase anon key
+# —— Nuxt 端 ——
+PYTHON_BACKEND_URL=http://127.0.0.1:8001
 INVITE_CODE_SECRET=your-random-secret    # 邀请码签名密钥（>=16 字符）
+AUTH_SECRET=your-random-secret           # 登录令牌签名密钥
+# —— Python 端 ——
+ANALYZE_PROVIDER=sensenova               # 或 deepseek / openai / openrouter / custom
+SENSE_NOVA_API_KEY=sk-xxxx
+SENSE_NOVA_BASE_URL=https://token.sensenova.cn/v1
+SENSE_NOVA_IMAGE_MODEL=sensenova-u1-fast
+SENSE_NOVA_IMAGE_SIZE=2048x2048
+SENSE_NOVA_WATERMARK=false               # false=无水印（公测免费）
+SENSE_NOVA_CHAT_MODEL=deepseek-v4-flash  # 文本分析模型
+DEEPSEEK_API_KEY=sk-xxxx                 # ANALYZE_PROVIDER=deepseek 时使用
 ```
 
-`server/server.env`：
-```env
-DEEPSEEK_API_KEY=sk-xxxx
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-COMFYUI_API_URL=http://localhost:8000/prompt
-```
-
-### 2. 初始化数据库
-
-在 Supabase Dashboard SQL Editor 执行 `init_supabase.sql`（7 张表 + 5 视图 + RPC + RLS）。
+> 数据库首次运行自动创建（`data/app.db.json`）；`init_supabase.sql` 仅作日后回迁云端参考，无需执行。
 
 ### 3. 启动后端（Python FastAPI，端口 8001）
 
@@ -99,7 +102,7 @@ pip install -r requirements.txt
 uvicorn main:app --reload --port 8001
 ```
 
-需要 ComfyUI 运行在 8000 端口。
+无需本地 ComfyUI，图像由 SenseNova U1 Fast 云端接口生成。
 
 ### 4. 启动前端（Nuxt，端口 3000）
 
@@ -156,7 +159,7 @@ kemenmanyou/
 ├── server/                         # Python FastAPI 后端
 │   ├── main.py                     # 主入口
 │   ├── multi_stitcher.py           # 长漫拼接
-│   ├── image_z_image_turbo.json    # ComfyUI 工作流
+│   ├── image_z_image_turbo.json    # ComfyUI 工作流（multi_stitcher 使用）
 │   └── requirements.txt
 ├── doc/API.md                      # API 文档
 ├── init_supabase.sql               # 数据库初始化

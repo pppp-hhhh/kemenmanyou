@@ -35,7 +35,8 @@ CREATE TYPE lesson_task_status AS ENUM ('pending', 'splitting', 'completed', 'fa
 CREATE TYPE audit_action AS ENUM (
   'work_approve', 'work_reject', 'work_delete', 'work_batch_approve', 'work_batch_reject', 'work_batch_delete',
   'lesson_delete', 'lesson_batch_delete',
-  'user_role_change', 'user_ban', 'user_unban'
+  'user_role_change', 'user_ban', 'user_unban',
+  'invite_code_generate'
 );
 
 -- ============================================

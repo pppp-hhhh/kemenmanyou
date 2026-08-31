@@ -1,10 +1,10 @@
-export default defineEventHandler(async (event): Promise<any> => {
-  const id = getRouterParam(event, 'id')
+import { requireLogin } from '~~/server/utils/auth'
+import { softDeleteLesson } from '~~/server/utils/local-db'
 
-  const response = await $fetch(`/api/lessons/${id}`, {
-    method: 'DELETE',
-    baseURL: 'http://localhost:8001',
-  })
-
-  return response
+export default defineEventHandler(async (event) => {
+  await requireLogin(event)
+  const id = Number(getRouterParam(event, 'id'))
+  const ok = await softDeleteLesson(id)
+  if (!ok) throw createError({ statusCode: 404, message: '课文不存在' })
+  return { message: '已删除' }
 })
