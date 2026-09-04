@@ -52,6 +52,9 @@ coverage/
 # Static generated content
 static/temp/
 static/works/*
+static/bg/
+static/gallery/
+static/uploads/
 !static/temp/.gitkeep
 !static/works/.gitkeep
 
@@ -64,3 +67,24 @@ server/.venv/
 
 # CodeGraph index
 .codegraph/
+
+# Database (local JSON DB: data/app.db.json)
+data/
+
+# Supabase (runtime deprecated; config.toml contains secret sbp_ tokens)
+supabase/
+
+# Tool caches
+.agent-teams/
+.graphflow-cache/
+graphflow-out/
+app/.graphflow-cache/
+app/graphflow-out/
+
+# Temp / scratch files
+app/app/**/*.vue.backup
+docs/_probe.md
+
+# Spike experiments (runtime artifacts only; .py source remains tracked)
+server/spike/__pycache__/
+server/spike/static/
